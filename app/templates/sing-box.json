@@ -1,86 +1,103 @@
 {
   "log": {
-    "level": "warn"
+    "level": "error"
   },
   "dns": {
     "servers": [
       {
+        "type": "udp",
         "tag": "dns-remote",
-        "address": "1.1.1.2",
+        "server": "1.1.1.1",
+        "server_port": 53,
         "detour": "proxy"
       },
       {
-        "tag": "dns-local",
-        "address": "local",
-        "detour": "direct"
-      }
-    ],
-    "rules": [
-      {
-        "outbound": "any",
-        "server": "dns-local"
+        "type": "udp",
+        "tag": "dns-backup",
+        "server": "8.8.8.8",
+        "server_port": 53,
+        "detour": "proxy"
       }
     ],
     "final": "dns-remote",
-    "strategy": "prefer_ipv4"
+    "strategy": "ipv4_only"
   },
   "inbounds": [
     {
       "type": "tun",
       "tag": "tun-in",
-      "interface_name": "sbtun0",
+      "interface_name": "throne-tun",
       "address": [
         "172.19.0.1/30",
         "fdfe:dcba:9876::1/126"
       ],
       "auto_route": true,
-      "route_exclude_address": [
-        "192.168.0.0/16",
-        "fc00::/7"
-      ],
-      "sniff": true,
-      "domain_strategy": "prefer_ipv4"
+      "strict_route": true,
+      "stack": "system"
     }
   ],
   "outbounds": [
     {
       "type": "selector",
       "tag": "proxy",
-      "outbounds": null,
+      "default": "vless-vision",
+      "outbounds": [
+        "vless-vision"
+      ],
       "interrupt_exist_connections": true
-    },
-    {
-      "type": "urltest",
-      "tag": "Best Latency",
-      "outbounds": null
-    },
-    {
-      "type": "direct",
-      "tag": "direct"
-    },
-    {
-      "type": "block",
-      "tag": "block"
-    },
-    {
-      "type": "dns",
-      "tag": "dns-out"
     }
   ],
   "route": {
     "rules": [
       {
+        "action": "sniff"
+      },
+      {
         "protocol": "dns",
-        "outbound": "dns-out"
+        "action": "hijack-dns"
+      },
+      {
+        "protocol": [
+          "quic",
+          "stun",
+          "bittorrent"
+        ],
+        "action": "reject"
+      },
+      {
+        "network": "udp",
+        "port": [
+          443,
+          3478,
+          19302
+        ],
+        "action": "reject"
+      },
+      {
+        "domain": [
+          "location.googleapis.com",
+          "connectivitycheck.android.com",
+          "connectivitycheck.gstatic.com"
+        ],
+        "domain_suffix": [
+          "app-measurement.com",
+          "firebase-settings.crashlytics.com"
+        ],
+        "action": "reject"
       },
       {
         "ip_is_private": true,
-        "outbound": "direct"
+        "action": "reject"
+      },
+      {
+        "ip_cidr": [
+          "::/0"
+        ],
+        "action": "reject"
       }
     ],
     "final": "proxy",
-    "auto_detect_interface": true,
-    "override_android_vpn": true
+    "auto_detect_interface": true
   },
   "experimental": {
     "cache_file": {

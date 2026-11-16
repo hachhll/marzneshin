@@ -1,2 +1,1 @@
-from .db import *
-from .env import *
+from .env import *  # noqa: F401,F403

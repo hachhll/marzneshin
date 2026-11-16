@@ -200,3 +200,10 @@ dashboard/.vite/deps_temp_f42dd32d/package.json
 dashboard/.vite/deps
 dashboard/coverage
 note.md
+
+# Local VPN credentials and private inventory (NEVER commit)
+.vpn_cred*/
+*vpn-credentials/
+.env.*
+!.env.example
+.local-inventory.md
