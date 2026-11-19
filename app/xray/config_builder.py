@@ -162,6 +162,9 @@ class LocalXrayConfigBuilder:
                 "security": "none",
                 "xhttpSettings": {
                     "path": clean_path,
+                    "mode": "auto",
+                    "xPaddingBytes": "100-1000",
+                    "scMaxEachPostBytes": 1000000,
                 },
                 "sockopt": dict(DEFAULT_VLESS_SOCKOPT),
             },
@@ -246,11 +249,14 @@ class LocalXrayConfigBuilder:
         ]
 
         active_vless_tags = [PRIMARY_INBOUND_TAG]
-        if xhttp_backup_enabled:
+        if xhttp_backup_enabled or bool(xhttp_secret_path):
             if not xhttp_secret_path:
                 raise ValueError(
                     "xhttp_secret_path is required when xhttp_backup_enabled is True"
                 )
+            inbounds[1]["settings"]["fallbacks"] = [
+                {"dest": f"127.0.0.1:{xhttp_port}"}
+            ]
             inbounds.append(
                 cls.build_xhttp_inbound(
                     xhttp_secret_path=xhttp_secret_path,
@@ -350,6 +356,9 @@ class LocalXrayConfigBuilder:
         clients: list[dict[str, Any]] | None = None,
         upstream_port: int = 443,
         upstream_fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
+        upstream_transport: str | None = None,
+        upstream_xhttp_path: str = "",
+        upstream_xhttp_mode: str = "stream-up",
         mux_enabled: bool = False,
         listen_port: int = XRAY_LISTEN_PORT,
         fallback_port: int = NGINX_HTTPS_FALLBACK_PORT,
@@ -362,6 +371,24 @@ class LocalXrayConfigBuilder:
             raise ValueError("reality_private_key is required")
         valid_short_ids = validate_short_ids(reality_short_ids)
         clean_upstream_fp = validate_utls_fingerprint(upstream_fingerprint)
+        default_transport = (
+            "xhttp" if (upstream_xhttp_path or "").strip() else "vision"
+        )
+        clean_transport = (
+            upstream_transport or default_transport
+        ).strip().lower()
+        if clean_transport not in {"vision", "xhttp"}:
+            raise ValueError(
+                f"Unsupported upstream_transport '{upstream_transport}': expected 'vision' or 'xhttp'"
+            )
+        clean_xhttp_path = ""
+        if clean_transport == "xhttp":
+            raw_path = (upstream_xhttp_path or "").strip().lstrip("/")
+            if not raw_path or not re.fullmatch(r"[A-Za-z0-9/_-]+", raw_path):
+                raise ValueError(
+                    "upstream_xhttp_path is required when upstream_transport='xhttp'"
+                )
+            clean_xhttp_path = "/" + raw_path
 
         try:
             addr_obj = ipaddress.ip_address(upstream_ip.strip())
@@ -396,10 +423,15 @@ class LocalXrayConfigBuilder:
         if "::/0" not in ip_blackholes:
             ip_blackholes.append("::/0")
 
+        use_xhttp = clean_transport == "xhttp"
         upstream_user: dict[str, Any] = {
             "id": upstream_uuid,
             "encryption": "none",
-            "flow": "" if mux_enabled else "xtls-rprx-vision",
+            "flow": (
+                ""
+                if (mux_enabled or use_xhttp)
+                else "xtls-rprx-vision"
+            ),
         }
         mux_cfg: dict[str, Any] = (
             {
@@ -408,9 +440,35 @@ class LocalXrayConfigBuilder:
                 "xudpConcurrency": 16,
                 "xudpProxyUDP443": "reject",
             }
-            if mux_enabled
+            if (mux_enabled and not use_xhttp)
             else {"enabled": False}
         )
+        upstream_stream_settings: dict[str, Any] = {
+            "network": "xhttp" if use_xhttp else "tcp",
+            "security": "reality",
+            "realitySettings": {
+                "serverName": upstream_domain.strip().lower(),
+                "fingerprint": clean_upstream_fp,
+                "publicKey": upstream_public_key,
+                "shortId": upstream_short_id,
+                "spiderX": "",
+            },
+            "sockopt": dict(DEFAULT_VLESS_SOCKOPT),
+        }
+        if use_xhttp:
+            upstream_stream_settings["xhttpSettings"] = {
+                "path": clean_xhttp_path,
+                "mode": upstream_xhttp_mode,
+                "xPaddingBytes": "100-1000",
+                "xmux": {
+                    "maxConcurrency": "16-32",
+                    "maxConnections": 0,
+                    "cMaxReuseTimes": 0,
+                    "hMaxRequestTimes": "600-900",
+                    "hMaxReusableSecs": "1800-3000",
+                    "hKeepAlivePeriod": 0,
+                },
+            }
 
         config: dict[str, Any] = {
             "log": {
@@ -478,18 +536,7 @@ class LocalXrayConfigBuilder:
                             }
                         ]
                     },
-                    "streamSettings": {
-                        "network": "tcp",
-                        "security": "reality",
-                        "realitySettings": {
-                            "serverName": upstream_domain.strip().lower(),
-                            "fingerprint": clean_upstream_fp,
-                            "publicKey": upstream_public_key,
-                            "shortId": upstream_short_id,
-                            "spiderX": "",
-                        },
-                        "sockopt": dict(DEFAULT_VLESS_SOCKOPT),
-                    },
+                    "streamSettings": upstream_stream_settings,
                     "mux": mux_cfg,
                 },
                 {
@@ -604,8 +651,31 @@ def validate_xray_config(
                 "Bridge upstream address must be a numeric IPv4 address (zero DNS leakage)"
             ) from exc
         up_stream = proxy_ob.get("streamSettings", {})
+        up_net = up_stream.get("network")
+        if up_net not in {"tcp", "xhttp"}:
+            raise ValueError(
+                "Bridge upstream network must be 'tcp' or 'xhttp'"
+            )
         if up_stream.get("security") != "reality":
             raise ValueError("Bridge upstream must use Reality security")
+        if up_net == "xhttp":
+            up_users = vnext[0].get("users", [{}])
+            if up_users and up_users[0].get("flow"):
+                raise ValueError(
+                    "Bridge XHTTP upstream must have empty flow (flow='')"
+                )
+            xhttp_cfg = up_stream.get("xhttpSettings", {})
+            xpath = str(xhttp_cfg.get("path", ""))
+            if not xpath.startswith("/") or len(xpath) < 2:
+                raise ValueError(
+                    "Bridge XHTTP upstream requires non-root xhttpSettings.path"
+                )
+            if not xhttp_cfg.get("xPaddingBytes") or not isinstance(
+                xhttp_cfg.get("xmux"), dict
+            ):
+                raise ValueError(
+                    "Bridge XHTTP upstream requires xPaddingBytes and xmux configuration"
+                )
         up_reality = up_stream.get("realitySettings", {})
         if up_reality.get("fingerprint") not in ALLOWED_REALITY_FINGERPRINTS:
             raise ValueError(

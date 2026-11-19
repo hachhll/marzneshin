@@ -20,11 +20,206 @@ SINGBOX_TELEMETRY_EXACT_DOMAINS = [
     "location.googleapis.com",
     "connectivitycheck.android.com",
     "connectivitycheck.gstatic.com",
+    "firebaselogging.googleapis.com",
+    "firebaselogging-pa.googleapis.com",
 ]
 
 SINGBOX_TELEMETRY_DOMAIN_SUFFIXES = [
     "app-measurement.com",
     "firebase-settings.crashlytics.com",
+]
+
+SELECTIVE_ANDROID_DIRECT_PACKAGES = [
+    "com.google.android.apps.messaging",
+    "com.google.android.dialer",
+]
+
+SELECTIVE_DIRECT_BYPASS_DOMAINS = [
+    "mobileconfiguration-pa.googleapis.com",
+    "reminders-pa.googleapis.com",
+    "mtalk.google.com",
+    "alt1-mtalk.google.com",
+    "alt2-mtalk.google.com",
+    "alt3-mtalk.google.com",
+    "alt4-mtalk.google.com",
+    "alt5-mtalk.google.com",
+    "alt6-mtalk.google.com",
+    "alt7-mtalk.google.com",
+    "alt8-mtalk.google.com",
+]
+
+PODKOP_COMMUNITY_RULESET_BASE = (
+    "https://github.com/itdoginfo/allow-domains/releases/latest/download"
+)
+
+PODKOP_COMMUNITY_RULESET_NAMES = [
+    "discord",
+    "google_ai",
+    "google_play",
+    "telegram",
+    "meta",
+    "twitter",
+    "russia_inside",
+]
+
+# Pure domain-only rule-sets safe inside dns.rules on sing-box 1.14+ (others include ip_cidr/port_range
+# and stay in route.rules while their domains are covered by SELECTIVE_VPN_DOMAIN_SUFFIXES).
+PODKOP_DNS_DOMAIN_RULESET_NAMES = [
+    "google_ai",
+    "google_play",
+    "russia_inside",
+]
+
+SELECTIVE_VPN_DOMAIN_SUFFIXES = [
+    # Netflix / Streaming
+    "netflix.com",
+    "netflix.net",
+    "nflximg.net",
+    "nflxvideo.net",
+    "nflxso.net",
+    "nflxext.com",
+    "fast.com",
+    # Google / Antigravity / YouTube / Gemini / NotebookLM
+    "google.com",
+    "google.ru",
+    "googleapis.com",
+    "googleusercontent.com",
+    "googlevideo.com",
+    "gstatic.com",
+    "gvt1.com",
+    "gvt2.com",
+    "ggpht.com",
+    "ytimg.com",
+    "youtube.com",
+    "youtu.be",
+    "withgoogle.com",
+    "deepmind.google",
+    "antigravity.google",
+    "antigravityide.net",
+    "notebooklm.google",
+    "notebooklm-enterprise.google",
+    "gemini.google",
+    "labs.google",
+    "google.dev",
+    "google.ai",
+    "ai.google",
+    "ai.dev",
+    "g.co",
+    "goo.gl",
+    "firebaseapp.com",
+    "gmail.com",
+    "recaptcha.net",
+    # OpenAI / Anthropic / AI IDEs
+    "openai.com",
+    "chatgpt.com",
+    "oaistatic.com",
+    "oaiusercontent.com",
+    "sora.com",
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "claude.usercontent.com",
+    "claudeusercontent.com",
+    "claudemcpclient.com",
+    "cursor.com",
+    "cursor.sh",
+    "cursor-cdn.com",
+    "windsurf.com",
+    "codeium.com",
+    "perplexity.ai",
+    "huggingface.co",
+    # Databricks / Okta / Auth0
+    "databricks.com",
+    "databricks.com.cn",
+    "databricks.cfg",
+    "databricks-labs.com",
+    "databricks-prod-cloudfront.com",
+    "azuredatabricks.net",
+    "databricksusercontent.com",
+    "evently.com",
+    "databriks.com",
+    "databriks.net",
+    "okta.com",
+    "oktacdn.com",
+    "oktapreview.com",
+    "okta-emea.com",
+    "auth0.com",
+    "auth0.net",
+    # Discord / Telegram
+    "discord.com",
+    "discordapp.com",
+    "discordapp.net",
+    "discord.gg",
+    "discord.media",
+    "discordstatus.com",
+    "discordcdn.com",
+    "telegram.org",
+    "t.me",
+    "tdesktop.com",
+    "telesco.pe",
+    "telegra.ph",
+    "tg.dev",
+    "telegram.me",
+    # Social Media (Instagram / Facebook / Meta / X / LinkedIn)
+    "instagram.com",
+    "cdninstagram.com",
+    "facebook.com",
+    "fbcdn.net",
+    "fbsbx.com",
+    "fb.com",
+    "meta.com",
+    "threads.net",
+    "x.com",
+    "twitter.com",
+    "twimg.com",
+    "t.co",
+    "linkedin.com",
+    "licdn.com",
+]
+
+TELEGRAM_DC_CIDRS = [
+    "149.154.160.0/20",
+    "91.105.192.0/23",
+    "91.108.4.0/22",
+    "91.108.8.0/22",
+    "91.108.12.0/22",
+    "91.108.16.0/22",
+    "91.108.20.0/22",
+    "91.108.56.0/22",
+    "185.76.151.0/24",
+]
+
+SELECTIVE_WINDOWS_PROCESSES = [
+    "Antigravity.exe",
+    "Antigravity IDE.exe",
+    "language_server_windows_x64.exe",
+    "agy.exe",
+    "Cursor.exe",
+    "Windsurf.exe",
+    "Claude.exe",
+    "ChatGPT.exe",
+    "Discord.exe",
+    "Telegram.exe",
+    "firefox.exe",
+    "brave.exe",
+]
+
+SELECTIVE_ANDROID_PACKAGES = [
+    "com.google.android.youtube",
+    "com.google.android.apps.youtube.music",
+    "com.openai.chatgpt",
+    "com.anthropic.claude",
+    "com.google.android.apps.bard",
+    "com.discord",
+    "org.telegram.messenger",
+    "org.telegram.messenger.web",
+    "org.thunderdog.challegram",
+    "com.instagram.android",
+    "com.facebook.katana",
+    "com.twitter.android",
+    "com.linkedin.android",
+    "org.mozilla.firefox",
+    "com.brave.browser",
 ]
 
 
@@ -122,6 +317,229 @@ def build_vless_xhttp_uri(
     return f"vless://{user_uuid}@{host}:{port}?{query}#{tag}"
 
 
+def _build_singbox_dns_and_route(
+    *,
+    platform: str,
+    strategy: str,
+    ipv6_egress_enabled: bool,
+    routing_mode: str,
+    selective_domains: list[str] | None = None,
+    selective_apps: list[str] | None = None,
+    selective_cidrs: list[str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build DNS and route config blocks for either full-tunnel or selective whitelist mode."""
+    base_dns_servers: list[dict[str, Any]] = [
+        {
+            "type": "udp",
+            "tag": "dns-remote",
+            "server": "1.1.1.1",
+            "server_port": 53,
+            "detour": "proxy",
+        },
+        {
+            "type": "udp",
+            "tag": "dns-backup",
+            "server": "8.8.8.8",
+            "server_port": 53,
+            "detour": "proxy",
+        },
+    ]
+    telemetry_reject_rule: dict[str, Any] = {
+        "domain": list(SINGBOX_TELEMETRY_EXACT_DOMAINS),
+        "domain_suffix": list(SINGBOX_TELEMETRY_DOMAIN_SUFFIXES),
+        "action": "reject",
+    }
+
+    if routing_mode == "full":
+        route_rules: list[dict[str, Any]] = [
+            {"action": "sniff"},
+            {"protocol": "dns", "action": "hijack-dns"},
+            {"protocol": ["quic", "stun", "bittorrent"], "action": "reject"},
+            {"network": "udp", "port": [443, 3478, 19302], "action": "reject"},
+            telemetry_reject_rule,
+            {"ip_is_private": True, "action": "reject"},
+        ]
+        if not ipv6_egress_enabled:
+            route_rules.append({"ip_cidr": ["::/0"], "action": "reject"})
+        route_cfg: dict[str, Any] = {
+            "rules": route_rules,
+            "final": "proxy",
+            "auto_detect_interface": True,
+        }
+        if platform != "windows11-throne":
+            route_cfg["override_android_vpn"] = True
+        dns_cfg: dict[str, Any] = {
+            "servers": base_dns_servers,
+            "final": "dns-remote",
+            "strategy": strategy,
+        }
+        return dns_cfg, route_cfg
+
+    is_windows = platform == "windows11-throne"
+    app_field = "process_name" if is_windows else "package_name"
+    apps = list(
+        (SELECTIVE_WINDOWS_PROCESSES if is_windows else SELECTIVE_ANDROID_PACKAGES)
+        if selective_apps is None
+        else selective_apps
+    )
+    domains = list(
+        SELECTIVE_VPN_DOMAIN_SUFFIXES
+        if selective_domains is None
+        else selective_domains
+    )
+    cidrs = list(TELEGRAM_DC_CIDRS if selective_cidrs is None else selective_cidrs)
+    use_http_client_v14 = not is_windows
+    http_client_tag = "proxy-http"
+    podkop_rulesets = [
+        (
+            {
+                "type": "remote",
+                "tag": f"podkop-{name}",
+                "format": "binary",
+                "url": f"{PODKOP_COMMUNITY_RULESET_BASE}/{name}.srs",
+                "http_client": http_client_tag,
+                "update_interval": "1d",
+            }
+            if use_http_client_v14
+            else {
+                "type": "remote",
+                "tag": f"podkop-{name}",
+                "format": "binary",
+                "url": f"{PODKOP_COMMUNITY_RULESET_BASE}/{name}.srs",
+                "download_detour": "proxy",
+                "update_interval": "1d",
+            }
+        )
+        for name in PODKOP_COMMUNITY_RULESET_NAMES
+    ]
+    podkop_tags = [rs["tag"] for rs in podkop_rulesets]
+    podkop_dns_tags = [f"podkop-{name}" for name in PODKOP_DNS_DOMAIN_RULESET_NAMES]
+
+    dns_rules: list[dict[str, Any]] = [
+        {"query_type": "HTTPS", "action": "reject"},
+    ]
+    if apps:
+        dns_rules.append({app_field: apps, "action": "route", "server": "dns-remote"})
+    if not is_windows:
+        dns_rules.append(
+            {
+                "package_name": list(SELECTIVE_ANDROID_DIRECT_PACKAGES),
+                "action": "route",
+                "server": "dns-local",
+            }
+        )
+    dns_rules.append(
+        {
+            "domain": list(SELECTIVE_DIRECT_BYPASS_DOMAINS),
+            "action": "route",
+            "server": "dns-local",
+        }
+    )
+    dns_rules.append(
+        {"domain_suffix": [".ru", ".su", ".xn--p1ai"], "action": "route", "server": "dns-local"}
+    )
+    dns_rules.append(
+        {"rule_set": podkop_dns_tags, "action": "route", "server": "dns-remote"}
+    )
+    if domains:
+        dns_rules.append(
+            {"domain_suffix": domains, "action": "route", "server": "dns-remote"}
+        )
+
+    dns_cfg = {
+        "servers": [*base_dns_servers, {"type": "local", "tag": "dns-local"}],
+        "rules": dns_rules,
+        "final": "dns-local",
+        "strategy": strategy,
+    }
+
+    route_rules = [
+        {"action": "sniff"},
+        {"protocol": "dns", "action": "hijack-dns"},
+        {"ip_is_private": True, "action": "route", "outbound": "direct"},
+        telemetry_reject_rule,
+    ]
+    if not ipv6_egress_enabled:
+        route_rules.append({"ip_cidr": ["::/0"], "action": "reject"})
+    if is_windows:
+        route_rules.extend(
+            [
+                {
+                    "inbound": ["mixed-in"],
+                    "network": "udp",
+                    "port": [443, 3478, 19302],
+                    "action": "reject",
+                },
+                {"inbound": ["mixed-in"], "action": "route", "outbound": "proxy"},
+            ]
+        )
+    if apps:
+        route_rules.extend(
+            [
+                {
+                    app_field: apps,
+                    "network": "udp",
+                    "port": [443, 3478, 19302],
+                    "action": "reject",
+                },
+                {app_field: apps, "action": "route", "outbound": "proxy"},
+            ]
+        )
+    if not is_windows:
+        route_rules.append(
+            {
+                "package_name": list(SELECTIVE_ANDROID_DIRECT_PACKAGES),
+                "action": "route",
+                "outbound": "direct",
+            }
+        )
+    route_rules.append(
+        {
+            "domain": list(SELECTIVE_DIRECT_BYPASS_DOMAINS),
+            "action": "route",
+            "outbound": "direct",
+        }
+    )
+    route_rules.extend(
+        [
+            {
+                "rule_set": podkop_tags,
+                "network": "udp",
+                "port": [443, 3478, 19302],
+                "action": "reject",
+            },
+            {"rule_set": podkop_tags, "action": "route", "outbound": "proxy"},
+        ]
+    )
+    if domains:
+        route_rules.extend(
+            [
+                {
+                    "domain_suffix": domains,
+                    "network": "udp",
+                    "port": [443, 3478, 19302],
+                    "action": "reject",
+                },
+                {"domain_suffix": domains, "action": "route", "outbound": "proxy"},
+            ]
+        )
+    if cidrs:
+        route_rules.append({"ip_cidr": cidrs, "action": "route", "outbound": "proxy"})
+
+    route_cfg = {
+        "rule_set": podkop_rulesets,
+        "rules": route_rules,
+        "final": "direct",
+        "auto_detect_interface": True,
+        "default_domain_resolver": "dns-local",
+    }
+    if use_http_client_v14:
+        route_cfg["default_http_client"] = http_client_tag
+    if not is_windows:
+        route_cfg["override_android_vpn"] = True
+    return dns_cfg, route_cfg
+
+
 def build_singbox_profile(
     *,
     domain: str,
@@ -135,8 +553,17 @@ def build_singbox_profile(
     ipv6_egress_enabled: bool = False,
     server_host: str | None = None,
     fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
+    routing_mode: str = "full",
+    selective_domains: list[str] | None = None,
+    selective_apps: list[str] | None = None,
+    selective_cidrs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate hardened sing-box JSON for Windows 11 Throne or Android."""
+    clean_mode = (routing_mode or "full").strip().lower()
+    if clean_mode not in {"full", "selective"}:
+        raise ValueError(
+            f"Unsupported routing_mode '{routing_mode}': expected 'full' or 'selective'"
+        )
     connect_host, sni = _resolve_connect_host_and_sni(domain, server_host)
     validate_short_ids([reality_short_id])
     clean_fp = validate_utls_fingerprint(fingerprint)
@@ -157,7 +584,6 @@ def build_singbox_profile(
             ],
             "auto_route": True,
             "strict_route": True,
-            "stack": "system",
         }
     ]
     if platform == "windows11-throne":
@@ -241,82 +667,73 @@ def build_singbox_profile(
         },
         *vless_outbounds,
     ]
+    if clean_mode == "selective":
+        outbounds.append({"type": "direct", "tag": "direct"})
 
-    route_rules: list[dict[str, Any]] = [
-        {
-            "action": "sniff",
-        },
-        {
-            "protocol": "dns",
-            "action": "hijack-dns",
-        },
-        {
-            "protocol": ["quic", "stun", "bittorrent"],
-            "action": "reject",
-        },
-        {
-            "network": "udp",
-            "port": [443, 3478, 19302],
-            "action": "reject",
-        },
-        {
-            "domain": list(SINGBOX_TELEMETRY_EXACT_DOMAINS),
-            "domain_suffix": list(SINGBOX_TELEMETRY_DOMAIN_SUFFIXES),
-            "action": "reject",
-        },
-        {
-            "ip_is_private": True,
-            "action": "reject",
-        },
-    ]
-    if not ipv6_egress_enabled:
-        route_rules.append(
-            {
-                "ip_cidr": ["::/0"],
-                "action": "reject",
-            }
-        )
+    dns_cfg, route_cfg = _build_singbox_dns_and_route(
+        platform=platform,
+        strategy=strategy,
+        ipv6_egress_enabled=ipv6_egress_enabled,
+        routing_mode=clean_mode,
+        selective_domains=selective_domains,
+        selective_apps=selective_apps,
+        selective_cidrs=selective_cidrs,
+    )
 
-    route_cfg: dict[str, Any] = {
-        "rules": route_rules,
-        "final": "proxy",
-        "auto_detect_interface": True,
-    }
+    cache_cfg: dict[str, Any] = {"enabled": True}
     if platform != "windows11-throne":
-        route_cfg["override_android_vpn"] = True
+        cache_cfg["store_dns"] = True
 
-    return {
+    profile: dict[str, Any] = {
         "log": {"level": "error"},
-        "dns": {
-            "servers": [
-                {
-                    "type": "udp",
-                    "tag": "dns-remote",
-                    "server": "1.1.1.1",
-                    "server_port": 53,
-                    "detour": "proxy",
-                },
-                {
-                    "type": "udp",
-                    "tag": "dns-backup",
-                    "server": "8.8.8.8",
-                    "server_port": 53,
-                    "detour": "proxy",
-                },
-            ],
-            "final": "dns-remote",
-            "strategy": strategy,
-        },
+        "dns": dns_cfg,
         "inbounds": inbounds,
         "outbounds": outbounds,
         "route": route_cfg,
         "experimental": {
-            "cache_file": {
-                "enabled": True,
-                "store_rdrc": True,
-            }
+            "cache_file": cache_cfg,
         },
     }
+    if clean_mode == "selective" and platform != "windows11-throne":
+        profile["http_clients"] = [{"tag": "proxy-http", "detour": "proxy"}]
+    return profile
+
+
+def build_singbox_selective_profile(
+    *,
+    domain: str,
+    user_uuid: str,
+    reality_public_key: str,
+    reality_short_id: str,
+    xhttp_secret_path: str = "",
+    include_xhttp_backup: bool = True,
+    platform: str = "windows11-throne",
+    port: int = 443,
+    ipv6_egress_enabled: bool = False,
+    server_host: str | None = None,
+    fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
+    selective_domains: list[str] | None = None,
+    selective_apps: list[str] | None = None,
+    selective_cidrs: list[str] | None = None,
+) -> dict[str, Any]:
+    """Generate whitelist-only sing-box profile: all traffic direct except selected apps/services."""
+    return build_singbox_profile(
+        domain=domain,
+        user_uuid=user_uuid,
+        reality_public_key=reality_public_key,
+        reality_short_id=reality_short_id,
+        xhttp_secret_path=xhttp_secret_path,
+        include_xhttp_backup=include_xhttp_backup,
+        platform=platform,
+        port=port,
+        ipv6_egress_enabled=ipv6_egress_enabled,
+        server_host=server_host,
+        fingerprint=fingerprint,
+        routing_mode="selective",
+        selective_domains=selective_domains,
+        selective_apps=selective_apps,
+        selective_cidrs=selective_cidrs,
+    )
 
 
 def build_xray_client_profile(
@@ -483,32 +900,36 @@ def write_client_bundle(
         )
         uris.append(xhttp_uri)
 
-    throne_cfg = build_singbox_profile(
-        domain=domain,
-        user_uuid=user_uuid,
-        reality_public_key=reality_public_key,
-        reality_short_id=reality_short_id,
-        xhttp_secret_path=xhttp_secret_path,
-        include_xhttp_backup=bool(xhttp_secret_path and not server_host),
-        platform="windows11-throne",
-        port=port,
-        ipv6_egress_enabled=ipv6_egress_enabled,
-        server_host=server_host,
-        fingerprint=clean_fp,
+    include_backup = bool(xhttp_secret_path and not server_host)
+    common_sb_kwargs: dict[str, Any] = {
+        "domain": domain,
+        "user_uuid": user_uuid,
+        "reality_public_key": reality_public_key,
+        "reality_short_id": reality_short_id,
+        "xhttp_secret_path": xhttp_secret_path,
+        "include_xhttp_backup": include_backup,
+        "port": port,
+        "ipv6_egress_enabled": ipv6_egress_enabled,
+        "server_host": server_host,
+        "fingerprint": clean_fp,
+    }
+    singbox_targets = (
+        ("throne", "throne-windows11.json", "windows11-throne", "full"),
+        ("throne_selective", "throne-windows11-selective.json", "windows11-throne", "selective"),
+        ("android", "android-singbox.json", "android", "full"),
+        ("android_selective", "android-singbox-selective.json", "android", "selective"),
     )
-    android_cfg = build_singbox_profile(
-        domain=domain,
-        user_uuid=user_uuid,
-        reality_public_key=reality_public_key,
-        reality_short_id=reality_short_id,
-        xhttp_secret_path=xhttp_secret_path,
-        include_xhttp_backup=bool(xhttp_secret_path and not server_host),
-        platform="android",
-        port=port,
-        ipv6_egress_enabled=ipv6_egress_enabled,
-        server_host=server_host,
-        fingerprint=clean_fp,
-    )
+    paths: dict[str, Path] = {}
+    for key, filename, sb_platform, r_mode in singbox_targets:
+        cfg = build_singbox_profile(
+            platform=sb_platform,
+            routing_mode=r_mode,
+            **common_sb_kwargs,
+        )
+        p = out / filename
+        p.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+        paths[key] = p
+
     xray_cfg = build_xray_client_profile(
         domain=domain,
         user_uuid=user_uuid,
@@ -520,22 +941,15 @@ def write_client_bundle(
         fingerprint=clean_fp,
     )
 
-    throne_path = out / "throne-windows11.json"
-    android_path = out / "android-singbox.json"
     xray_path = out / "xray-client.json"
     links_path = out / "links.txt"
 
-    throne_path.write_text(json.dumps(throne_cfg, indent=2) + "\n", encoding="utf-8")
-    android_path.write_text(json.dumps(android_cfg, indent=2) + "\n", encoding="utf-8")
     xray_path.write_text(json.dumps(xray_cfg, indent=2) + "\n", encoding="utf-8")
     links_path.write_text("\n".join(uris) + "\n", encoding="utf-8")
 
-    return {
-        "throne": throne_path,
-        "android": android_path,
-        "xray": xray_path,
-        "links": links_path,
-    }
+    paths["xray"] = xray_path
+    paths["links"] = links_path
+    return paths
 
 
 def format_terminal_credentials(
@@ -555,6 +969,8 @@ def format_terminal_credentials(
     upstream_domain: str = "",
     fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
     upstream_fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
+    upstream_transport: str = "vision",
+    upstream_xhttp_path: str = "",
 ) -> str:
     """Format SSH terminal summary with VLESS URIs, UTF-8 QR code, and Throne/Android instructions."""
     clean_fp = validate_utls_fingerprint(fingerprint)
@@ -582,6 +998,14 @@ def format_terminal_credentials(
         xhttp_line = f"\nBackup VLESS (XHTTP + TLS) [{xhttp_status}]:\n  {xhttp_uri}\n"
 
     if mode == "bridge":
+        clean_up_transport = (upstream_transport or "vision").strip().lower()
+        if clean_up_transport == "xhttp":
+            transport_desc = "transport=xhttp+reality+xmux, mode=stream-up"
+            toggle_hint = "sudo ./script.sh bridge-transport vision"
+        else:
+            transport_desc = "transport=vision, flow=xtls-rprx-vision"
+            path_arg = upstream_xhttp_path or "<XHTTP_SECRET_PATH>"
+            toggle_hint = f"sudo ./script.sh bridge-transport xhttp --path {path_arg}"
         title = (
             f" ZERO-LOOP VLESS CASCADE BRIDGE ({server_host or domain} -> {upstream_domain or upstream_ip})"
         )
@@ -589,11 +1013,22 @@ def format_terminal_credentials(
             "Cascade Bridge Topology (Zero-Emission / Fail-Closed):\n"
             f"  - Bridge Entry:     {server_host or domain}:{port} (SNI={domain})\n"
             f"  - Local Fallback:   127.0.0.1:8443 (0 external probe loops)\n"
-            f"  - Frankfurt Exit:   {upstream_ip}:443 (SNI={upstream_domain}, uTLS={clean_upstream_fp}, flow=xtls-rprx-vision)\n\n"
+            f"  - Frankfurt Exit:   {upstream_ip}:443 (SNI={upstream_domain}, uTLS={clean_upstream_fp}, {transport_desc})\n"
+            f"  - Switch Transport: {toggle_hint}\n\n"
         )
     else:
         title = f" ZERO-SURFACE VLESS SELF-REALITY APPLIANCE ({domain})"
         exit_ip_val = server_ip or "<FRANKFURT_SERVER_IP>"
+        xhttp_bridge_flags = ""
+        xhttp_switch_hint = ""
+        if xhttp_secret_path:
+            xhttp_bridge_flags = (
+                f" \\\n    --upstream-transport xhttp \\\n    --upstream-xhttp-path {xhttp_secret_path}"
+            )
+            xhttp_switch_hint = (
+                f"  Existing Moscow Bridge Switch Command (XHTTP+Reality+xmux default):\n"
+                f"    sudo ./script.sh bridge-transport xhttp --path {xhttp_secret_path} --upstream-ip {exit_ip_val} --upstream-domain {domain} --upstream-uuid {user_uuid} --upstream-pbk {reality_public_key} --upstream-sid {reality_short_id}\n"
+            )
         bridge_section = (
             "Moscow Cascade Bridge Setup Command (Run on clean Ubuntu 26 RU server):\n"
             "  sudo ./script.sh --bridge \\\n"
@@ -601,8 +1036,9 @@ def format_terminal_credentials(
             f"    --upstream-domain {domain} \\\n"
             f"    --upstream-uuid {user_uuid} \\\n"
             f"    --upstream-pbk {reality_public_key} \\\n"
-            f"    --upstream-sid {reality_short_id} \\\n"
+            f"    --upstream-sid {reality_short_id}{xhttp_bridge_flags} \\\n"
             "    --bridge-sni <DEDICATED_BRIDGE_DOMAIN> --bridge-acme\n"
+            f"{xhttp_switch_hint}"
             "  (Do NOT reuse upstream domain/AI server for general family traffic; see RISK_TRACKING_AND_MITIGATION.md)\n\n"
         )
 
@@ -616,10 +1052,12 @@ def format_terminal_credentials(
         f"{qr_block}\n\n"
         f"{bridge_section}"
         "Client Profile Bundle Saved To:\n"
-        f"  - Windows 11 Throne (sing-box TUN): {credentials_dir}/throne-windows11.json\n"
-        f"  - Android (sing-box TUN):           {credentials_dir}/android-singbox.json\n"
-        f"  - Xray Client JSON:                 {credentials_dir}/xray-client.json\n"
-        f"  - VLESS Links:                      {credentials_dir}/links.txt\n\n"
+        f"  - Windows 11 Throne (Full Tunnel):     {credentials_dir}/throne-windows11.json\n"
+        f"  - Windows 11 Throne (Selective VPN):   {credentials_dir}/throne-windows11-selective.json\n"
+        f"  - Android sing-box (Full Tunnel):      {credentials_dir}/android-singbox.json\n"
+        f"  - Android sing-box (Selective VPN):    {credentials_dir}/android-singbox-selective.json\n"
+        f"  - Xray Client JSON:                    {credentials_dir}/xray-client.json\n"
+        f"  - VLESS Links:                         {credentials_dir}/links.txt\n\n"
         "Anti-Ban Checklist (Google Antigravity / Anthropic / OpenAI):\n"
         "  1. Windows 11 Throne: Import throne-windows11.json and enable TUN Mode (strict_route).\n"
         "  2. Android: Disable Google Location Accuracy & Wi-Fi/Bluetooth background scanning.\n"

@@ -125,6 +125,8 @@ def load_or_init_bridge_state(
     bridge_sni: str | None = None,
     bridge_ip: str = "",
     bridge_acme_enabled: bool = False,
+    upstream_transport: str | None = None,
+    upstream_xhttp_path: str | None = None,
 ) -> dict[str, Any]:
     clean_up_domain = validate_domain(upstream_domain)
     effective_sni = validate_domain(bridge_sni or clean_up_domain)
@@ -132,6 +134,17 @@ def load_or_init_bridge_state(
     if state_path.exists():
         existing = json.loads(state_path.read_text(encoding="utf-8"))
         if existing.get("mode") == "bridge":
+            resolved_xhttp_path = (
+                upstream_xhttp_path
+                if upstream_xhttp_path is not None
+                else existing.get("upstream_xhttp_path", "")
+            ).strip().strip("/")
+            default_tr = "xhttp" if resolved_xhttp_path else "vision"
+            resolved_transport = (
+                upstream_transport
+                or existing.get("upstream_transport")
+                or default_tr
+            ).strip().lower()
             existing.update(
                 {
                     "mode": "bridge",
@@ -147,6 +160,8 @@ def load_or_init_bridge_state(
                     "upstream_uuid": upstream_uuid.strip(),
                     "upstream_public_key": upstream_public_key.strip(),
                     "upstream_short_id": upstream_short_id.strip(),
+                    "upstream_transport": resolved_transport,
+                    "upstream_xhttp_path": resolved_xhttp_path,
                 }
             )
             save_state(state_path, existing)
@@ -158,6 +173,8 @@ def load_or_init_bridge_state(
     xhttp_secret = secrets.token_hex(32)
     entropy_seed = secrets.token_hex(24)
 
+    clean_xhttp_path = (upstream_xhttp_path or "").strip().strip("/")
+    default_tr = "xhttp" if clean_xhttp_path else "vision"
     state = {
         "mode": "bridge",
         "domain": effective_sni,
@@ -169,6 +186,8 @@ def load_or_init_bridge_state(
         "upstream_uuid": upstream_uuid.strip(),
         "upstream_public_key": upstream_public_key.strip(),
         "upstream_short_id": upstream_short_id.strip(),
+        "upstream_transport": (upstream_transport or default_tr).strip().lower(),
+        "upstream_xhttp_path": clean_xhttp_path,
         "user_uuid": user_uuid,
         "reality_private_key": priv_key,
         "reality_public_key": pub_key,
@@ -236,6 +255,8 @@ def apply_state(
             upstream_uuid=state["upstream_uuid"],
             upstream_public_key=state["upstream_public_key"],
             upstream_short_id=state["upstream_short_id"],
+            upstream_transport=state.get("upstream_transport", "vision"),
+            upstream_xhttp_path=state.get("upstream_xhttp_path", ""),
             listen_port=XRAY_LISTEN_PORT,
             fallback_port=NGINX_HTTPS_FALLBACK_PORT,
             api_address=XRAY_API_ADDRESS,
@@ -335,6 +356,22 @@ def main(argv: list[str] | None = None) -> int:
     p_bridge.add_argument("--bridge-ip", default="")
     p_bridge.add_argument("--bridge-acme", action="store_true")
     p_bridge.add_argument("--acme-http-challenge", action="store_true")
+    p_bridge.add_argument(
+        "--upstream-transport", choices=["vision", "xhttp"], default=None
+    )
+    p_bridge.add_argument("--upstream-xhttp-path", default=None)
+
+    p_bt = sub.add_parser(
+        "bridge-transport",
+        help="Switch Cascade Bridge upstream transport between vision and xhttp",
+    )
+    p_bt.add_argument("transport", choices=["vision", "xhttp"])
+    p_bt.add_argument("--path", default=None)
+    p_bt.add_argument("--upstream-ip", default=None)
+    p_bt.add_argument("--upstream-domain", default=None)
+    p_bt.add_argument("--upstream-uuid", default=None)
+    p_bt.add_argument("--upstream-pbk", default=None)
+    p_bt.add_argument("--upstream-sid", default=None)
 
     sub.add_parser("status", help="Print VLESS URIs, QR code, and profile paths")
 
@@ -370,6 +407,8 @@ def main(argv: list[str] | None = None) -> int:
             bridge_sni=args.bridge_sni,
             bridge_ip=args.bridge_ip,
             bridge_acme_enabled=bool(args.bridge_acme),
+            upstream_transport=args.upstream_transport,
+            upstream_xhttp_path=args.upstream_xhttp_path,
         )
         apply_state(
             state,
@@ -377,6 +416,31 @@ def main(argv: list[str] | None = None) -> int:
             credentials_dir=credentials_dir,
             enable_bridge_http=bool(args.acme_http_challenge),
         )
+    elif args.cmd == "bridge-transport":
+        state = load_or_init_state(state_path)
+        if state.get("mode") != "bridge":
+            raise ValueError(
+                "bridge-transport is only supported on Cascade Bridge nodes (mode='bridge')"
+            )
+        if args.path is not None:
+            state["upstream_xhttp_path"] = args.path.strip().strip("/")
+        if args.upstream_ip:
+            state["upstream_ip"] = args.upstream_ip.strip()
+        if args.upstream_domain:
+            state["upstream_domain"] = validate_domain(args.upstream_domain)
+        if args.upstream_uuid:
+            state["upstream_uuid"] = args.upstream_uuid.strip()
+        if args.upstream_pbk:
+            state["upstream_public_key"] = args.upstream_pbk.strip()
+        if args.upstream_sid:
+            state["upstream_short_id"] = args.upstream_sid.strip()
+        if args.transport == "xhttp" and not state.get("upstream_xhttp_path"):
+            raise ValueError(
+                "Switching bridge to 'xhttp' requires --path <64-hex-xhttp-secret-path> (from 'sudo ./script.sh xhttp on' on Exit node)"
+            )
+        state["upstream_transport"] = args.transport
+        apply_state(state, data_dir=data_dir, credentials_dir=credentials_dir)
+        save_state(state_path, state)
     elif args.cmd == "status":
         state = load_or_init_state(state_path)
         is_bridge = state.get("mode") == "bridge"
@@ -399,6 +463,11 @@ def main(argv: list[str] | None = None) -> int:
             )
     elif args.cmd == "xhttp":
         state = load_or_init_state(state_path)
+        if args.mode == "off":
+            sys.stderr.write(
+                "[WARN] Ensure any downstream Cascade Bridge is switched to "
+                "'sudo ./script.sh bridge-transport vision' before disabling XHTTP on the Exit node.\n"
+            )
         state["xhttp_backup_enabled"] = args.mode == "on"
         save_state(state_path, state)
         apply_state(state, data_dir=data_dir, credentials_dir=credentials_dir)
@@ -445,6 +514,8 @@ def main(argv: list[str] | None = None) -> int:
             server_ip=state.get("server_ip", ""),
             upstream_ip=state.get("upstream_ip", ""),
             upstream_domain=state.get("upstream_domain", ""),
+            upstream_transport=state.get("upstream_transport", "vision"),
+            upstream_xhttp_path=state.get("upstream_xhttp_path", ""),
         )
     )
     return 0

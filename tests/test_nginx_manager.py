@@ -130,13 +130,27 @@ def test_nginx_manager_zero_surface_and_probe_isolation(tmp_path: Path):
     assert "etag off;" in text_disabled
     assert "if_modified_since off;" in text_disabled
     assert 'add_header Last-Modified "";' in text_disabled
+    assert "Strict-Transport-Security" in text_disabled
     assert "/sub/" not in text_disabled
     assert "/api/" not in text_disabled
     assert "/dashboard/" not in text_disabled
     assert "panel_auth" not in text_disabled
     assert "/secret_xhttp_path_1" not in text_disabled
     assert (tmp_path / "decoy" / "index.html").exists()
+    assert "ArmenyTravel" in (tmp_path / "decoy" / "index.html").read_text()
+    assert (tmp_path / "decoy" / "ru" / "index.html").exists()
+    assert (tmp_path / "decoy" / "de" / "index.html").exists()
+    assert (tmp_path / "decoy" / "tours.html").exists()
+    assert (tmp_path / "decoy" / "guide.html").exists()
+    assert (tmp_path / "decoy" / "assets" / "style.css").exists()
+    assert (tmp_path / "decoy" / "assets" / "app.js").exists()
+    assert (tmp_path / "decoy" / "assets" / "ararat.svg").exists()
+    assert (tmp_path / "decoy" / "assets" / "sevan.svg").exists()
+    assert (tmp_path / "decoy" / "assets" / "tatev.svg").exists()
     assert (tmp_path / "decoy" / "404.html").exists()
+    assert (tmp_path / "decoy" / "robots.txt").exists()
+    assert (tmp_path / "decoy" / "sitemap.xml").exists()
+    assert (tmp_path / "decoy" / "favicon.ico").exists()
     assert (tmp_path / "reload.trigger").exists()
 
     # Polymorphic decoy HTML produces distinct output across installs
@@ -155,6 +169,7 @@ def test_nginx_manager_zero_surface_and_probe_isolation(tmp_path: Path):
     )
     text_enabled = conf_enabled.read_text()
     assert "location /secret_xhttp_path_1 {" in text_enabled
+    assert "client_max_body_size 0;" in text_enabled
     assert "proxy_pass http://127.0.0.1:10086;" in text_enabled
     assert "proxy_buffering off;" in text_enabled
     assert "proxy_request_buffering off;" in text_enabled

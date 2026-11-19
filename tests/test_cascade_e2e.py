@@ -77,14 +77,20 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
     nx_http_port = _free_port()
     nx_fallback_port = _free_port()
     exit_port = _free_port()
+    exit_xhttp_port = _free_port()
     bridge_port = _free_port()
+    bridge_xhttp_port = _free_port()
     exit_api_port = _free_port()
     bridge_api_port = _free_port()
+    bridge_xhttp_api_port = _free_port()
     socks_port = _free_port()
+    socks_xhttp_port = _free_port()
+    xhttp_secret = "e" * 64
 
     cname_nx = f"compat-nx-{os.getpid()}"
     cname_exit = f"compat-exit-{os.getpid()}"
     cname_br = f"compat-br-{os.getpid()}"
+    cname_br_xh = f"compat-br-xh-{os.getpid()}"
 
     with tempfile.TemporaryDirectory(prefix="marzneshin-compat-") as td:
         tmp = Path(td)
@@ -153,9 +159,12 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
             reality_private_key=priv_exit,
             reality_short_ids=[sid_exit],
             clients=[{"id": uid_exit, "email": "owner"}],
+            xhttp_backup_enabled=True,
+            xhttp_secret_path=xhttp_secret,
             listen_port=exit_port,
             fallback_port=nx_fallback_port,
             api_address=f"127.0.0.1:{exit_api_port}",
+            xhttp_port=exit_xhttp_port,
         )
         exit_cfg["log"] = {"loglevel": "debug"}
         exit_cfg["inbounds"][1]["listen"] = "127.0.0.1"
@@ -173,6 +182,7 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
             upstream_public_key=pub_exit,
             upstream_short_id=sid_exit,
             upstream_port=exit_port,
+            upstream_transport="vision",
             listen_port=bridge_port,
             fallback_port=nx_fallback_port,
             api_address=f"127.0.0.1:{bridge_api_port}",
@@ -182,9 +192,32 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
         br_cfg["inbounds"][1]["streamSettings"]["realitySettings"]["show"] = True
         (tmp / "bridge.json").write_text(json.dumps(br_cfg))
 
+        br_xh_cfg = LocalXrayConfigBuilder.build_bridge(
+            bridge_sni=domain,
+            reality_private_key=priv_br,
+            reality_short_ids=[sid_br],
+            clients=[{"id": uid_br, "email": "owner"}],
+            upstream_ip="127.0.0.1",
+            upstream_domain=domain,
+            upstream_uuid=uid_exit,
+            upstream_public_key=pub_exit,
+            upstream_short_id=sid_exit,
+            upstream_port=exit_port,
+            upstream_transport="xhttp",
+            upstream_xhttp_path=xhttp_secret,
+            listen_port=bridge_xhttp_port,
+            fallback_port=nx_fallback_port,
+            api_address=f"127.0.0.1:{bridge_xhttp_api_port}",
+        )
+        br_xh_cfg["log"] = {"loglevel": "debug"}
+        br_xh_cfg["inbounds"][1]["listen"] = "127.0.0.1"
+        br_xh_cfg["inbounds"][1]["streamSettings"]["realitySettings"]["show"] = True
+        (tmp / "bridge_xhttp.json").write_text(json.dumps(br_xh_cfg))
+
         nx_proc = None
         exit_proc = None
         br_proc = None
+        br_xh_proc = None
         sb_proc = None
         try:
             nx_proc = subprocess.Popen(
@@ -253,9 +286,33 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
                 text=True,
             )
 
+            br_xh_proc = subprocess.Popen(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--name",
+                    cname_br_xh,
+                    "--network",
+                    "host",
+                    "-v",
+                    f"{tmp}:{tmp}:ro",
+                    "--entrypoint",
+                    "xray",
+                    image_tag,
+                    "run",
+                    "-c",
+                    str(tmp / "bridge_xhttp.json"),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
             _wait_tcp("127.0.0.1", nx_fallback_port, timeout=10.0)
             _wait_tcp("127.0.0.1", exit_port, timeout=10.0)
             _wait_tcp("127.0.0.1", bridge_port, timeout=10.0)
+            _wait_tcp("127.0.0.1", bridge_xhttp_port, timeout=10.0)
 
             sb_cfg = {
                 "log": {"level": "debug"},
@@ -265,7 +322,13 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
                         "tag": "socks-in",
                         "listen": "127.0.0.1",
                         "listen_port": socks_port,
-                    }
+                    },
+                    {
+                        "type": "socks",
+                        "tag": "socks-xhttp-in",
+                        "listen": "127.0.0.1",
+                        "listen_port": socks_xhttp_port,
+                    },
                 ],
                 "outbounds": [
                     {
@@ -285,8 +348,35 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
                                 "short_id": sid_br,
                             },
                         },
-                    }
+                    },
+                    {
+                        "type": "vless",
+                        "tag": "proxy-via-xhttp-bridge",
+                        "server": "127.0.0.1",
+                        "server_port": bridge_xhttp_port,
+                        "uuid": uid_br,
+                        "flow": "xtls-rprx-vision",
+                        "tls": {
+                            "enabled": True,
+                            "server_name": domain,
+                            "utls": {"enabled": True, "fingerprint": "firefox"},
+                            "reality": {
+                                "enabled": True,
+                                "public_key": pub_br,
+                                "short_id": sid_br,
+                            },
+                        },
+                    },
                 ],
+                "route": {
+                    "rules": [
+                        {
+                            "inbound": ["socks-xhttp-in"],
+                            "outbound": "proxy-via-xhttp-bridge",
+                        }
+                    ],
+                    "final": "proxy",
+                },
             }
             (tmp / "sb.json").write_text(json.dumps(sb_cfg))
             sb_proc = subprocess.Popen(
@@ -296,52 +386,60 @@ def test_singbox_reality_handshake_and_bridge_cascade_compatibility():
                 text=True,
             )
             _wait_tcp("127.0.0.1", socks_port, timeout=5.0)
+            _wait_tcp("127.0.0.1", socks_xhttp_port, timeout=5.0)
 
-            # Trigger SOCKS5 connection through sing-box -> Bridge -> Exit (non-external IPv4 blackhole test IP)
+            # Trigger SOCKS5 connection through sing-box -> Bridge (Vision) -> Exit AND sing-box -> Bridge (XHTTP+Reality+xmux) -> Exit
             env = os.environ.copy()
             env.pop("NO_PROXY", None)
             env.pop("no_proxy", None)
-            subprocess.run(
-                [
-                    "curl",
-                    "--noproxy",
-                    "",
-                    "-sS",
-                    "-m",
-                    "2",
-                    "--socks5-hostname",
-                    f"127.0.0.1:{socks_port}",
-                    "http://198.18.0.1/",
-                ],
-                env=env,
-                capture_output=True,
-                text=True,
-            )
+            for sp in (socks_port, socks_xhttp_port):
+                subprocess.run(
+                    [
+                        "curl",
+                        "--noproxy",
+                        "",
+                        "-sS",
+                        "-m",
+                        "2",
+                        "--socks5-hostname",
+                        f"127.0.0.1:{sp}",
+                        "http://198.18.0.1/",
+                    ],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
 
-            # Terminate clients/servers cleanly and verify Reality handshake completed on BOTH Bridge and Exit
+            # Terminate clients/servers cleanly and verify Reality handshake completed on Vision Bridge, XHTTP Bridge, and Dual-Mode Exit
             sb_proc.terminate()
             sb_out, _ = sb_proc.communicate(timeout=3)
             subprocess.run(
-                ["docker", "rm", "-f", cname_br, cname_exit, cname_nx],
+                ["docker", "rm", "-f", cname_br, cname_br_xh, cname_exit, cname_nx],
                 capture_output=True,
             )
             br_out, _ = br_proc.communicate(timeout=3)
+            br_xh_out, _ = br_xh_proc.communicate(timeout=3)
             exit_out, _ = exit_proc.communicate(timeout=3)
 
             assert "reality verification failed" not in sb_out
             assert "x509:" not in sb_out
             assert "hs.c.isHandshakeComplete.Load(): true" in br_out, br_out
             assert "authentication failed" not in br_out
+            assert "hs.c.isHandshakeComplete.Load(): true" in br_xh_out, br_xh_out
+            assert "authentication failed" not in br_xh_out
+            assert "XHTTP is dialing" in br_xh_out, br_xh_out
             assert "hs.c.isHandshakeComplete.Load(): true" in exit_out, exit_out
+            assert "fallback starts" in exit_out, exit_out
             assert "authentication failed" not in exit_out
             assert "taking detour [proxy]" in br_out
+            assert "taking detour [proxy]" in br_xh_out
         finally:
             if sb_proc and sb_proc.poll() is None:
                 sb_proc.terminate()
             subprocess.run(
-                ["docker", "rm", "-f", cname_br, cname_exit, cname_nx],
+                ["docker", "rm", "-f", cname_br, cname_br_xh, cname_exit, cname_nx],
                 capture_output=True,
             )
-            for p in (nx_proc, exit_proc, br_proc):
+            for p in (nx_proc, exit_proc, br_proc, br_xh_proc):
                 if p and p.poll() is None:
                     p.terminate()

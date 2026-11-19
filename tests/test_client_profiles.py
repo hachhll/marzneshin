@@ -1,12 +1,19 @@
 import json
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from app.client import (
+    PODKOP_COMMUNITY_RULESET_NAMES,
+    PODKOP_DNS_DOMAIN_RULESET_NAMES,
+    SELECTIVE_ANDROID_DIRECT_PACKAGES,
+    SELECTIVE_ANDROID_PACKAGES,
+    SELECTIVE_DIRECT_BYPASS_DOMAINS,
+    SELECTIVE_VPN_DOMAIN_SUFFIXES,
+    SELECTIVE_WINDOWS_PROCESSES,
+    TELEGRAM_DC_CIDRS,
     build_singbox_profile,
+    build_singbox_selective_profile,
     build_vless_vision_uri,
     build_vless_xhttp_uri,
     build_xray_client_profile,
@@ -183,6 +190,22 @@ def test_xray_client_profile_and_bundle_writer(tmp_path: Path):
     assert "vless://" in summary
     assert "--bridge" in summary
     assert "--upstream-domain vpn.example.com" in summary
+    assert f"bridge-transport xhttp --path {'c' * 64}" in summary
+
+    bridge_summary = format_terminal_credentials(
+        domain="bridge.example.com",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        mode="bridge",
+        server_host="198.51.100.20",
+        upstream_ip="203.0.113.20",
+        upstream_domain="vpn.example.com",
+        upstream_transport="xhttp",
+        upstream_xhttp_path="c" * 64,
+    )
+    assert "transport=xhttp+reality+xmux, mode=stream-up" in bridge_summary
+    assert "sudo ./script.sh bridge-transport vision" in bridge_summary
 
     # Bridge-mode client bundle uses server_host IP while keeping FQDN SNI
     bridge_paths = write_client_bundle(
@@ -206,11 +229,141 @@ def test_xray_client_profile_and_bundle_writer(tmp_path: Path):
     android_cfg = json.loads(bridge_paths["android"].read_text())
     assert android_cfg["route"].get("override_android_vpn") is True
 
-    if shutil.which("sing-box"):
-        res = subprocess.run(
-            ["sing-box", "check", "-c", str(bridge_paths["throne"])],
-            capture_output=True,
-            text=True,
-            timeout=10,
+
+def test_selective_whitelist_singbox_profiles_for_windows_and_android(tmp_path: Path):
+    _, pub = generate_reality_keypair()
+    sid = generate_short_id()
+    uid = "11111111-1111-1111-1111-111111111111"
+
+    with pytest.raises(ValueError, match="Unsupported routing_mode"):
+        build_singbox_profile(
+            domain="bridge.example.com",
+            user_uuid=uid,
+            reality_public_key=pub,
+            reality_short_id=sid,
+            server_host="198.51.100.20",
+            routing_mode="badmode",
         )
-        assert res.returncode == 0, res.stderr + res.stdout
+
+    paths = write_client_bundle(
+        tmp_path,
+        domain="bridge.example.com",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        server_host="198.51.100.20",
+    )
+    assert paths["throne_selective"].exists()
+    assert paths["android_selective"].exists()
+
+    win_sel = json.loads(paths["throne_selective"].read_text())
+    and_sel = json.loads(paths["android_selective"].read_text())
+
+    expected_podkop_tags = [f"podkop-{name}" for name in PODKOP_COMMUNITY_RULESET_NAMES]
+    expected_podkop_dns_tags = [f"podkop-{name}" for name in PODKOP_DNS_DOMAIN_RULESET_NAMES]
+
+    for cfg, app_field, expected_apps, is_android in (
+        (win_sel, "process_name", SELECTIVE_WINDOWS_PROCESSES, False),
+        (and_sel, "package_name", SELECTIVE_ANDROID_PACKAGES, True),
+    ):
+        assert cfg["route"]["final"] == "direct"
+        assert cfg["route"]["default_domain_resolver"] == "dns-local"
+        assert cfg["dns"]["final"] == "dns-local"
+        assert cfg["dns"]["strategy"] == "ipv4_only"
+        tun_in = next(i for i in cfg["inbounds"] if i["type"] == "tun")
+        assert "stack" not in tun_in
+        assert "store_rdrc" not in cfg["experimental"]["cache_file"]
+        assert cfg["experimental"]["cache_file"]["enabled"] is True
+
+        out_tags = {o["tag"] for o in cfg["outbounds"]}
+        assert {"proxy", "vless-vision", "direct"}.issubset(out_tags)
+        assert "urltest" not in [o["type"] for o in cfg["outbounds"]]
+
+        vless_out = next(o for o in cfg["outbounds"] if o["type"] == "vless")
+        assert vless_out["server"] == "198.51.100.20"
+        assert vless_out["tls"]["server_name"] == "bridge.example.com"
+        assert vless_out["tls"]["utls"]["fingerprint"] == "firefox"
+
+        dns_servers = {s["tag"]: s for s in cfg["dns"]["servers"]}
+        assert dns_servers["dns-remote"]["detour"] == "proxy"
+        assert dns_servers["dns-local"]["type"] == "local"
+        assert "223.5.5.5" not in json.dumps(cfg)
+
+        dns_rules = cfg["dns"]["rules"]
+        # HTTPS type-65 rejected, then app/process -> remote, SMS/mtalk/reminders & .ru -> local, then domain-only Podkop & custom domains -> remote
+        assert dns_rules[0] == {"query_type": "HTTPS", "action": "reject"}
+        assert dns_rules[1][app_field] == expected_apps
+        assert dns_rules[1]["server"] == "dns-remote"
+        assert dns_rules[1]["action"] == "route"
+        idx = 2
+        if is_android:
+            assert dns_rules[idx]["package_name"] == SELECTIVE_ANDROID_DIRECT_PACKAGES
+            assert dns_rules[idx]["server"] == "dns-local"
+            idx += 1
+        assert dns_rules[idx]["domain"] == SELECTIVE_DIRECT_BYPASS_DOMAINS
+        assert dns_rules[idx]["server"] == "dns-local"
+        assert dns_rules[idx + 1]["domain_suffix"] == [".ru", ".su", ".xn--p1ai"]
+        assert dns_rules[idx + 1]["server"] == "dns-local"
+        assert dns_rules[idx + 2]["rule_set"] == expected_podkop_dns_tags
+        assert dns_rules[idx + 2]["server"] == "dns-remote"
+        assert dns_rules[idx + 3]["domain_suffix"] == SELECTIVE_VPN_DOMAIN_SUFFIXES
+        assert dns_rules[idx + 3]["server"] == "dns-remote"
+
+        rule_sets = cfg["route"]["rule_set"]
+        assert [rs["tag"] for rs in rule_sets] == expected_podkop_tags
+        if is_android:
+            assert cfg["http_clients"] == [{"tag": "proxy-http", "detour": "proxy"}]
+            assert cfg["route"]["default_http_client"] == "proxy-http"
+            assert cfg["experimental"]["cache_file"].get("store_dns") is True
+        else:
+            assert "http_clients" not in cfg
+        for rs in rule_sets:
+            assert rs["type"] == "remote"
+            assert rs["format"] == "binary"
+            if is_android:
+                assert rs["http_client"] == "proxy-http"
+                assert "download_detour" not in rs
+            else:
+                assert rs["download_detour"] == "proxy"
+            assert rs["update_interval"] == "1d"
+            assert rs["url"].startswith("https://github.com/itdoginfo/allow-domains/releases/latest/download/")
+
+        rules = cfg["route"]["rules"]
+        # Private IPs direct (IDE local IPC), telemetry & IPv6 rejected above proxy rules
+        idx_private = next(i for i, r in enumerate(rules) if r.get("ip_is_private") is True)
+        idx_telem = next(i for i, r in enumerate(rules) if "location.googleapis.com" in r.get("domain", []))
+        idx_ipv6 = next(i for i, r in enumerate(rules) if r.get("ip_cidr") == ["::/0"])
+        idx_app_proxy = next(i for i, r in enumerate(rules) if r.get(app_field) == expected_apps and r.get("outbound") == "proxy")
+        idx_direct_dom = next(i for i, r in enumerate(rules) if r.get("domain") == SELECTIVE_DIRECT_BYPASS_DOMAINS and r.get("outbound") == "direct")
+        idx_rs_proxy = next(i for i, r in enumerate(rules) if r.get("rule_set") == expected_podkop_tags and r.get("outbound") == "proxy")
+        idx_dom_proxy = next(i for i, r in enumerate(rules) if r.get("domain_suffix") == SELECTIVE_VPN_DOMAIN_SUFFIXES and r.get("outbound") == "proxy")
+        idx_tg_cidr = next(i for i, r in enumerate(rules) if r.get("ip_cidr") == TELEGRAM_DC_CIDRS and r.get("outbound") == "proxy")
+
+        assert rules[idx_private]["outbound"] == "direct"
+        assert rules[idx_telem]["action"] == "reject"
+        assert "firebaselogging.googleapis.com" in rules[idx_telem]["domain"]
+        assert rules[idx_ipv6]["action"] == "reject"
+        assert idx_telem < idx_app_proxy < idx_direct_dom < idx_rs_proxy < idx_dom_proxy < idx_tg_cidr
+        if is_android:
+            idx_direct_pkg = next(i for i, r in enumerate(rules) if r.get("package_name") == SELECTIVE_ANDROID_DIRECT_PACKAGES and r.get("outbound") == "direct")
+            assert idx_app_proxy < idx_direct_pkg < idx_direct_dom
+
+    assert "Antigravity.exe" in win_sel["dns"]["rules"][1]["process_name"]
+    assert "com.google.android.youtube" in and_sel["dns"]["rules"][1]["package_name"]
+    assert {"netflix.com", "claude.ai", "databricks.com", "okta.com", "antigravity.google"}.issubset(
+        set(SELECTIVE_VPN_DOMAIN_SUFFIXES)
+    )
+    assert "override_android_vpn" not in win_sel["route"]
+    assert and_sel["route"]["override_android_vpn"] is True
+
+    custom_sel = build_singbox_selective_profile(
+        domain="vpn.example.com",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        platform="android",
+        selective_apps=["com.example.work"],
+        selective_domains=["example.org"],
+    )
+    assert custom_sel["dns"]["rules"][1]["package_name"] == ["com.example.work"]
+    assert custom_sel["route"]["final"] == "direct"

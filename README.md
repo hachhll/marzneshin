@@ -112,6 +112,8 @@ scp /tmp/appliance.tar.gz root@<IP_МОСКВЫ>:/root/appliance.tar.gz
        --upstream-uuid <UUID> \
        --upstream-pbk <PUBKEY> \
        --upstream-sid <SHORT_ID> \
+       --upstream-transport xhttp \
+       --upstream-xhttp-path <64_HEX_PATH> \
        --bridge-sni <DEDICATED_BRIDGE_DOMAIN> --bridge-acme
    ```
    Скопируйте её целиком.
@@ -151,7 +153,7 @@ scp /tmp/appliance.tar.gz root@<IP_МОСКВЫ>:/root/appliance.tar.gz
    **Что автоматически сделает `script.sh` в режиме `--bridge`:**
    - **Zero-Emission**: не выполнит ни одного исходящего HTTP/DNS/TLS-запроса.
    - Сгенерирует **отдельную собственную пару ключей Reality и UUID** для плеча `Ваш клиент -> Москва`.
-   - Настроит `marzneshin-xray` в режиме каскадного моста (`dest: "127.0.0.1:8443"`, `outbounds: ["proxy", "block"]` с `flow: "xtls-rprx-vision"`, без `direct`), а `marzneshin-nginx` — только на `127.0.0.1:8443` (порт `80` не слушается).
+   - Настроит `marzneshin-xray` в режиме каскадного моста (`dest: "127.0.0.1:8443"`, `outbounds: ["proxy", "block"]`, по умолчанию через `XHTTP + Reality + xmux` при передаче `--upstream-xhttp-path` либо `Vision`, без `direct`), а `marzneshin-nginx` — только на `127.0.0.1:8443` (порт `80` не слушается).
    - Перенесёт SSH на порт **`22222/tcp`**, создаст пользователя **`stealth`** с `sudo` и вашими SSH-ключами, отключит `root`, пароли и `ssh.socket`, а затем закроет порт `22/tcp`.
    - Откроет в `UFW` **только `22222/tcp` (SSH) и `443/tcp` (VLESS Reality)**.
    - Выведет в терминал QR-код и ссылку `vless://...@<IP_МОСКВЫ>:443?...` и сохранит клиентские конфиги в `/root/vpn-credentials/`.
@@ -164,8 +166,8 @@ scp /tmp/appliance.tar.gz root@<IP_МОСКВЫ>:/root/appliance.tar.gz
    scp -P 22222 stealth@<IP_МОСКВЫ>:/tmp/vpn-creds/* ~/Downloads/
    ssh -p 22222 stealth@<IP_МОСКВЫ> "rm -rf /tmp/vpn-creds"
    ```
-   - `throne-windows11.json` — профиль для **Throne / Nekoray / Sing-box на Windows 11** (`TUN`, `strict_route: true`, удалённый DNS через туннель, блокировка QUIC/STUN/IPv6/телеметрии).
-   - `android-singbox.json` — профиль для **Sing-box на Android** (либо отсканируйте QR-код из терминала в `v2rayNG` / `NekoBox`).
+   - `throne-windows11.json` / `throne-windows11-selective.json` — профили для **Throne / Sing-box на Windows 11** (`Full Tunnel` и `Selective` со списками `podkop` / процессов; требования см. в [SINGBOX_CLIENT_REQUIREMENTS.md](./SINGBOX_CLIENT_REQUIREMENTS.md)).
+   - `android-singbox.json` / `android-singbox-selective.json` — профили для **официального Sing-box на Android** (`1.14+`/`1.15+`: `Full Tunnel` и `Selective` со списками `podkop` и прямым обходом для РФ-сервисов/SMS/FCM; либо отсканируйте QR-код в `v2rayNG`).
    - `xray-client.json` — клиентский конфиг для Xray.
    - `links.txt` — текстовый файл со ссылкой `vless://`.
 
@@ -198,7 +200,8 @@ scp /tmp/appliance.tar.gz root@<IP_МОСКВЫ>:/root/appliance.tar.gz
 | `sudo ./script.sh self-test --active-probe` | Активная проверка TLS 1.3 и репутации IP для Google/OpenAI/Anthropic *(выполняется только на выходном узле во Франкфурте; на мосту автоматически игнорируется)*. |
 | `sudo ./script.sh rotate` | Сгенерировать новый `UUID`, ключи Reality и `shortId`, обновить файлы в `/root/vpn-credentials/` и перезапустить `marzneshin-xray`. |
 | `sudo ./script.sh decoy <preset\|url>` | Сменить сайт-прикрытие на выходном узле (`corporate`, `blog`, `coming_soon` или `https://...`). |
-| `sudo ./script.sh xhttp <on\|off>` | Включить или выключить резервный транспорт `VLESS + XHTTP + TLS` на выходном узле. |
+| `sudo ./script.sh xhttp <on\|off>` | Включить или выключить резервный транспорт `VLESS + XHTTP + TLS` через Nginx на выходном узле. |
+| `sudo ./script.sh bridge-transport <vision\|xhttp> [--path <64-hex>] ...` | Переключить магистраль московского моста между `XHTTP + Reality + xmux` и `Vision` (и при необходимости обновить IP/ключи Exit-узла). |
 
 ---
 
@@ -224,5 +227,5 @@ scp /tmp/appliance.tar.gz root@<IP_МОСКВЫ>:/root/appliance.tar.gz
 
 Ключевые зафиксированные проверки:
 - [test_cascade_e2e.py](./tests/test_cascade_e2e.py) — пересобирает образ из `Dockerfile` и в изолированной локальной цепочке (`sing-box -> Bridge -> Exit + Nginx`) проверяет реальный Reality-хендшейк (`hs.c.isHandshakeComplete.Load(): true`). Если новая версия `Xray` несовместима с `sing-box`, тест упадёт до выкладки на серверы.
-- [test_client_profiles.py](./tests/test_client_profiles.py) — прогоняет сгенерированный `throne-windows11.json` через `sing-box check`, гарантируя отсутствие устаревших/неподдерживаемых опций.
+- [test_client_profiles.py](./tests/test_client_profiles.py) — проверяет инварианты генерации всех клиентских JSON (`Full Tunnel` и `Selective` для Windows 11 Throne `1.13+` и Android `sing-box 1.14+/1.15+`), правила `podkop`, блокировку телеметрии/IPv6/QUIC/STUN и отсутствие устаревших полей (`stack`, `store_rdrc`).
 - [test_xray_config.py](./tests/test_xray_config.py) — проверяет инварианты моста (`AsIs` без утечки DNS в РФ, `Zero-Loop`, `tcpMptcp: false`, отсутствие `freedom`).

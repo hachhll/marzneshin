@@ -110,6 +110,11 @@ def test_xray_config_with_xhttp_and_ipv6_opt_in():
     assert cfg["dns"]["queryStrategy"] == "UseIP"
     assert cfg["outbounds"][0]["settings"]["domainStrategy"] == "UseIP"
 
+    primary = next(
+        i for i in cfg["inbounds"] if i["tag"] == PRIMARY_INBOUND_TAG
+    )
+    assert primary["settings"]["fallbacks"] == [{"dest": "127.0.0.1:10086"}]
+
     xhttp_inb = next(
         i for i in cfg["inbounds"] if i["tag"] == BACKUP_XHTTP_INBOUND_TAG
     )
@@ -120,6 +125,15 @@ def test_xray_config_with_xhttp_and_ipv6_opt_in():
     assert (
         xhttp_inb["streamSettings"]["xhttpSettings"]["path"]
         == "/secret-xhttp-path-1234"
+    )
+    assert xhttp_inb["streamSettings"]["xhttpSettings"]["mode"] == "auto"
+    assert (
+        xhttp_inb["streamSettings"]["xhttpSettings"]["xPaddingBytes"]
+        == "100-1000"
+    )
+    assert (
+        xhttp_inb["streamSettings"]["xhttpSettings"]["scMaxEachPostBytes"]
+        == 1000000
     )
     assert xhttp_inb["streamSettings"]["sockopt"] == {
         "tcpKeepAliveIdle": 120,
@@ -268,6 +282,57 @@ def test_xray_bridge_config_zero_loop_and_fail_closed():
     tampered["outbounds"].append({"tag": "direct", "protocol": "freedom"})
     with pytest.raises(ValueError, match="fail-closed"):
         validate_xray_config(tampered, mode="bridge")
+
+    # 6. Bridge XHTTP + Reality + xmux upstream mode
+    bridge_xhttp = LocalXrayConfigBuilder.build_bridge(
+        bridge_sni="bridge.example.com",
+        reality_private_key=priv_bridge,
+        reality_short_ids=[sid_bridge],
+        upstream_ip="203.0.113.20",
+        upstream_domain="exit.example.com",
+        upstream_uuid="22222222-2222-2222-2222-222222222222",
+        upstream_public_key=pub_exit,
+        upstream_short_id=sid_exit,
+        upstream_transport="xhttp",
+        upstream_xhttp_path="a" * 64,
+        clients=[{"id": "11111111-1111-1111-1111-111111111111", "email": "owner"}],
+    )
+    xhttp_ob = bridge_xhttp["outbounds"][0]
+    assert xhttp_ob["settings"]["vnext"][0]["users"][0]["flow"] == ""
+    assert xhttp_ob["streamSettings"]["network"] == "xhttp"
+    assert xhttp_ob["streamSettings"]["security"] == "reality"
+    assert (
+        xhttp_ob["streamSettings"]["xhttpSettings"]["path"]
+        == "/" + ("a" * 64)
+    )
+    assert xhttp_ob["streamSettings"]["xhttpSettings"]["mode"] == "stream-up"
+    assert (
+        xhttp_ob["streamSettings"]["xhttpSettings"]["xPaddingBytes"]
+        == "100-1000"
+    )
+    assert xhttp_ob["streamSettings"]["xhttpSettings"]["xmux"] == {
+        "maxConcurrency": "16-32",
+        "maxConnections": 0,
+        "cMaxReuseTimes": 0,
+        "hMaxRequestTimes": "600-900",
+        "hMaxReusableSecs": "1800-3000",
+        "hKeepAlivePeriod": 0,
+    }
+    assert xhttp_ob["mux"]["enabled"] is False
+
+    with pytest.raises(ValueError, match="upstream_xhttp_path"):
+        LocalXrayConfigBuilder.build_bridge(
+            bridge_sni="bridge.example.com",
+            reality_private_key=priv_bridge,
+            reality_short_ids=[sid_bridge],
+            upstream_ip="203.0.113.20",
+            upstream_domain="exit.example.com",
+            upstream_uuid="22222222-2222-2222-2222-222222222222",
+            upstream_public_key=pub_exit,
+            upstream_short_id=sid_exit,
+            upstream_transport="xhttp",
+            upstream_xhttp_path="",
+        )
 
     bad_fp = copy.deepcopy(bridge_cfg)
     bad_fp["outbounds"][0]["streamSettings"]["realitySettings"]["fingerprint"] = "bogus"

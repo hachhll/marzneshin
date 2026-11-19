@@ -153,7 +153,27 @@ async def test_bridge_mode_self_test_zero_emission(tmp_path: Path, monkeypatch: 
     chk = self_test.check_xray_config_safety(str(cfg_path))
     assert chk.passed is True, chk.detail
     assert "mode=bridge" in chk.detail
+    assert "upstream=tcp" in chk.detail
     assert "shared bridge/upstream SNI" in chk.detail
+
+    bridge_xhttp_cfg = LocalXrayConfigBuilder.build_bridge(
+        bridge_sni="bridge.example.com",
+        reality_private_key=priv,
+        reality_short_ids=[generate_short_id()],
+        clients=[{"id": "11111111-2222-3333-4444-555555555555", "email": "b@local"}],
+        upstream_ip="203.0.113.20",
+        upstream_domain="exit.example.com",
+        upstream_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        upstream_public_key=up_pub,
+        upstream_short_id="0123456789abcdef",
+        upstream_transport="xhttp",
+        upstream_xhttp_path="b" * 64,
+    )
+    cfg_xhttp_path = xray_dir / "config_xhttp.json"
+    cfg_xhttp_path.write_text(json.dumps(bridge_xhttp_cfg), encoding="utf-8")
+    chk_xhttp = self_test.check_xray_config_safety(str(cfg_xhttp_path))
+    assert chk_xhttp.passed is True, chk_xhttp.detail
+    assert "upstream=xhttp" in chk_xhttp.detail
 
     # Port 80 exposed externally on bridge node -> fails minimal_port_exposure in bridge mode
     tcp_bridge_with_80 = [

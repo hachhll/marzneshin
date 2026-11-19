@@ -16,6 +16,8 @@ UPSTREAM_DOMAIN=""
 UPSTREAM_UUID=""
 UPSTREAM_PBK=""
 UPSTREAM_SID=""
+UPSTREAM_TRANSPORT=""
+UPSTREAM_XHTTP_PATH=""
 BRIDGE_SNI=""
 BRIDGE_IP=""
 BRIDGE_ACME=0
@@ -26,9 +28,12 @@ usage() {
 Usage:
   script.sh --domain <fqdn> [--email <email>] [--decoy <preset|url>] [--allow-risky-tld] [--dry-run]
   script.sh --bridge --upstream-ip <ip> --upstream-domain <fqdn> --upstream-uuid <uuid> \
-            --upstream-pbk <pubkey> --upstream-sid <shortid> [--bridge-sni <sni>] [--bridge-ip <ip>] [--bridge-acme] [--email <email>] [--dry-run]
+            --upstream-pbk <pubkey> --upstream-sid <shortid> [--upstream-transport <vision|xhttp>] \
+            [--upstream-xhttp-path <64-hex>] [--bridge-sni <sni>] [--bridge-ip <ip>] [--bridge-acme] [--email <email>] [--dry-run]
   script.sh status
   script.sh xhttp <on|off>
+  script.sh bridge-transport <vision|xhttp> [--path <64-hex>] [--upstream-ip <ip>] [--upstream-domain <fqdn>] \
+            [--upstream-uuid <uuid>] [--upstream-pbk <pubkey>] [--upstream-sid <shortid>]
   script.sh rotate
   script.sh decoy <corporate|blog|coming_soon|https://...>
   script.sh self-test [--active-probe]
@@ -89,7 +94,12 @@ detect_ssh_ports() {
 reload_services_if_running() {
     if command -v docker >/dev/null 2>&1; then
         if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^marzneshin-xray$'; then
-            docker restart marzneshin-xray >/dev/null 2>&1 || true
+            if docker exec marzneshin-xray /usr/local/bin/xray run -test -config "${DATA_DIR}/xray/config.json" >/dev/null 2>&1; then
+                docker restart marzneshin-xray >/dev/null 2>&1 || true
+            else
+                log_err "Xray config test failed; refusing to restart marzneshin-xray."
+                return 1
+            fi
         fi
         if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^marzneshin-nginx$'; then
             docker exec marzneshin-nginx nginx -s reload -e /dev/null -c "${DATA_DIR}/nginx-runtime/nginx.conf" >/dev/null 2>&1 || true
@@ -112,6 +122,16 @@ handle_subcommand() {
                 exit 1
             fi
             run_python_cli xhttp "$mode"
+            reload_services_if_running
+            exit 0
+            ;;
+        bridge-transport)
+            shift
+            if [ "$#" -eq 0 ]; then
+                log_err "Usage: script.sh bridge-transport <vision|xhttp> [--path <64-hex>] [--upstream-ip <ip>] [--upstream-domain <fqdn>] [--upstream-uuid <uuid>] [--upstream-pbk <pubkey>] [--upstream-sid <shortid>]"
+                exit 1
+            fi
+            run_python_cli bridge-transport "$@"
             reload_services_if_running
             exit 0
             ;;
@@ -259,6 +279,28 @@ parse_args() {
                 ;;
             --upstream-sid=*)
                 UPSTREAM_SID="${1#*=}"
+                ;;
+            --upstream-transport)
+                shift
+                if [ "$#" -eq 0 ] || [ -z "${1:-}" ]; then
+                    log_err "--upstream-transport requires a value (vision or xhttp)"
+                    exit 1
+                fi
+                UPSTREAM_TRANSPORT="$1"
+                ;;
+            --upstream-transport=*)
+                UPSTREAM_TRANSPORT="${1#*=}"
+                ;;
+            --upstream-xhttp-path)
+                shift
+                if [ "$#" -eq 0 ] || [ -z "${1:-}" ]; then
+                    log_err "--upstream-xhttp-path requires a value"
+                    exit 1
+                fi
+                UPSTREAM_XHTTP_PATH="$1"
+                ;;
+            --upstream-xhttp-path=*)
+                UPSTREAM_XHTTP_PATH="${1#*=}"
                 ;;
             --bridge-sni)
                 shift
@@ -490,7 +532,7 @@ net.ipv4.tcp_keepalive_time = 120
 net.ipv4.tcp_keepalive_intvl = 30
 net.ipv4.tcp_keepalive_probes = 3
 net.ipv4.tcp_synack_retries = 2
-net.ipv4.tcp_syn_retries = 2
+net.ipv4.tcp_syn_retries = 1
 net.ipv4.tcp_retries2 = 5
 net.ipv4.tcp_max_syn_backlog = 4096
 net.ipv4.tcp_syncookies = 1
@@ -838,6 +880,12 @@ EOF
             --bridge-sni "$BRIDGE_SNI"
             --bridge-ip "$BRIDGE_IP"
         )
+        if [ -n "$UPSTREAM_TRANSPORT" ]; then
+            bridge_cli_args+=(--upstream-transport "$UPSTREAM_TRANSPORT")
+        fi
+        if [ -n "$UPSTREAM_XHTTP_PATH" ]; then
+            bridge_cli_args+=(--upstream-xhttp-path "$UPSTREAM_XHTTP_PATH")
+        fi
         if [ "$BRIDGE_ACME" -eq 1 ]; then
             bridge_cli_args+=(--bridge-acme)
             if needs_acme_cert; then

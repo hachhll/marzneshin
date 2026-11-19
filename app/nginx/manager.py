@@ -26,9 +26,13 @@ from app.config.env import (
 )
 from app.nginx.decoys import (
     DECOY_404_HTML,
+    DECOY_FAVICON_ICO,
     DecoyMode,
     get_decoy_404_html,
+    get_decoy_Auxiliary_pages,
     get_decoy_html,
+    get_decoy_robots_txt,
+    get_decoy_sitemap_xml,
 )
 
 PATH_RE = re.compile(r"^[a-zA-Z0-9/_-]{8,128}$")
@@ -159,6 +163,7 @@ class NginxManager:
             clean_xhttp = validate_xhttp_path(xhttp_secret_path)
             xhttp_block = f"""
     location /{clean_xhttp} {{
+        client_max_body_size 0;
         proxy_pass http://127.0.0.1:{self.xhttp_port};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -263,6 +268,7 @@ server {{
     etag off;
     if_modified_since off;
     add_header Last-Modified "";
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     proxy_hide_header Server;
     proxy_hide_header X-Powered-By;
@@ -288,6 +294,15 @@ events {{
 }}
 
 http {{
+    types {{
+        text/html                             html htm;
+        text/css                              css;
+        application/javascript                js;
+        image/svg+xml                         svg svgz;
+        image/x-icon                          ico;
+        text/plain                            txt;
+        application/xml                       xml;
+    }}
     default_type application/octet-stream;
     client_body_temp_path /tmp/nginx_client_temp;
     proxy_temp_path /tmp/nginx_proxy_temp;
@@ -358,6 +373,23 @@ http {{
                     entropy_seed=entropy_seed,
                 )
                 self._atomic_write(index_file, html_content)
+                clean_dom = validate_domain(domain)
+                self._atomic_write(
+                    self.decoy_dir / "robots.txt",
+                    get_decoy_robots_txt(clean_dom),
+                )
+                self._atomic_write(
+                    self.decoy_dir / "sitemap.xml",
+                    get_decoy_sitemap_xml(clean_dom),
+                )
+                self._atomic_write_bytes(
+                    self.decoy_dir / "favicon.ico",
+                    DECOY_FAVICON_ICO,
+                )
+                for rel_path, page_content in get_decoy_Auxiliary_pages(
+                    entropy_seed=entropy_seed
+                ).items():
+                    self._atomic_write(self.decoy_dir / rel_path, page_content)
             self._atomic_write(
                 not_found_file,
                 get_decoy_404_html(entropy_seed=entropy_seed)
@@ -398,12 +430,16 @@ http {{
 
     @staticmethod
     def _atomic_write(target: Path, content: str) -> None:
+        NginxManager._atomic_write_bytes(target, content.encode("utf-8"))
+
+    @staticmethod
+    def _atomic_write_bytes(target: Path, content: bytes) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_path = tempfile.mkstemp(
             dir=str(target.parent), prefix=f".{target.name}-"
         )
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "wb") as f:
                 f.write(content)
             os.chmod(tmp_path, 0o644)
             os.replace(tmp_path, target)

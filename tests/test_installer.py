@@ -365,7 +365,35 @@ def test_bridge_mode_zero_emission_installer_and_cli(tmp_path: Path):
     assert "sni=exit.example.com" in st.stdout
     assert "ZERO-LOOP VLESS CASCADE BRIDGE (192.0.2.20 -> exit.example.com)" in st.stdout
     assert "Frankfurt Exit:   203.0.113.20:443" in st.stdout
+    assert "transport=vision" in st.stdout
     assert not curl_log.exists()
+
+    # Switch bridge transport to xhttp and roll back to vision via script.sh bridge-transport
+    bt_xhttp = _run_installer(
+        bin_dir,
+        ["bridge-transport", "xhttp", "--path", "d" * 64],
+        extra_env=extra,
+    )
+    assert bt_xhttp.returncode == 0, bt_xhttp.stderr
+    assert "transport=xhttp+reality+xmux" in bt_xhttp.stdout
+    xray_cfg_xhttp = json.loads((data_dir / "xray" / "config.json").read_text())
+    validate_xray_config(xray_cfg_xhttp, mode="bridge")
+    assert xray_cfg_xhttp["outbounds"][0]["streamSettings"]["network"] == "xhttp"
+    assert (
+        xray_cfg_xhttp["outbounds"][0]["streamSettings"]["xhttpSettings"]["path"]
+        == "/" + ("d" * 64)
+    )
+
+    bt_vision = _run_installer(
+        bin_dir,
+        ["bridge-transport", "vision"],
+        extra_env=extra,
+    )
+    assert bt_vision.returncode == 0, bt_vision.stderr
+    assert "transport=vision" in bt_vision.stdout
+    xray_cfg_vision = json.loads((data_dir / "xray" / "config.json").read_text())
+    validate_xray_config(xray_cfg_vision, mode="bridge")
+    assert xray_cfg_vision["outbounds"][0]["streamSettings"]["network"] == "tcp"
 
     # 3. --bridge-acme rejects reusing upstream domain as bridge SNI and accepts independent FQDN
     res_bad_acme = _run_installer(
