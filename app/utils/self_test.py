@@ -129,8 +129,12 @@ def check_xray_config_safety(
                 except Exception:
                     pass
             up_net = proxy_ob.get("streamSettings", {}).get("network", "tcp")
+            has_loopback_stats = "StatsService" in cfg.get("api", {}).get("services", [])
+            stats_note = (
+                ", stats=in-memory(127.0.0.1)" if has_loopback_stats else ""
+            )
             detail = (
-                f"mode=bridge, upstream={up_net}, log=none, dest=127.0.0.1:8443 (Zero-Loop), "
+                f"mode=bridge, upstream={up_net}, log=none{stats_note}, dest=127.0.0.1:8443 (Zero-Loop), "
                 "fail-closed vless Reality proxy outbound (no direct freedom), "
                 "QUIC/STUN/::/0/telemetry blackholes active"
             )

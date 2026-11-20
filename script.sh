@@ -94,10 +94,17 @@ detect_ssh_ports() {
 reload_services_if_running() {
     if command -v docker >/dev/null 2>&1; then
         if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^marzneshin-xray$'; then
-            if docker exec marzneshin-xray /usr/local/bin/xray run -test -config "${DATA_DIR}/xray/config.json" >/dev/null 2>&1; then
+            local test_out=""
+            if test_out="$(docker exec marzneshin-xray /usr/local/bin/xray run -test -config "${DATA_DIR}/xray/config.json" 2>&1)"; then
                 docker restart marzneshin-xray >/dev/null 2>&1 || true
             else
-                log_err "Xray config test failed; refusing to restart marzneshin-xray."
+                if [ -f "${DATA_DIR}/xray/config.json.bak" ]; then
+                    cp "${DATA_DIR}/xray/config.json.bak" "${DATA_DIR}/xray/config.json" 2>/dev/null || true
+                    log_err "Xray config test failed; restored ${DATA_DIR}/xray/config.json.bak and refused to restart marzneshin-xray."
+                else
+                    log_err "Xray config test failed; refusing to restart marzneshin-xray."
+                fi
+                printf '%s\n' "$test_out" >&2
                 return 1
             fi
         fi
@@ -150,6 +157,24 @@ handle_subcommand() {
             run_python_cli decoy "$target"
             reload_services_if_running
             exit 0
+            ;;
+        stats)
+            shift
+            run_python_cli stats "$@"
+            exit $?
+            ;;
+        user)
+            shift
+            if [ "$#" -lt 2 ]; then
+                log_err "Usage: script.sh user <disable|enable> <name> [--automated]"
+                exit 1
+            fi
+            if [ -f "${DATA_DIR}/xray/config.json" ]; then
+                cp "${DATA_DIR}/xray/config.json" "${DATA_DIR}/xray/config.json.bak" 2>/dev/null || true
+            fi
+            run_python_cli user "$@"
+            reload_services_if_running
+            exit $?
             ;;
         self-test)
             shift

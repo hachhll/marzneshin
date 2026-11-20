@@ -4,10 +4,12 @@ import argparse
 import json
 import os
 import secrets
+import shutil
+import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.client.profile_generator import (
     format_terminal_credentials,
@@ -212,6 +214,248 @@ def save_state(state_path: Path, state: dict[str, Any]) -> None:
         pass
 
 
+def query_xray_user_stats(
+    *,
+    server: str = XRAY_API_ADDRESS,
+    reset: bool = False,
+    timeout_sec: float = 3.0,
+    container: str = "marzneshin-xray",
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> dict[str, Any]:
+    """Query loopback Xray StatsService in RAM with hard fail-fast timeout (zero disk logs)."""
+    cmd = [
+        "docker",
+        "exec",
+        container,
+        "/usr/local/bin/xray",
+        "api",
+        "statsquery",
+        f"--server={server}",
+        "-pattern",
+        "user>>>",
+    ]
+    if reset:
+        cmd.append("-reset=true")
+
+    exec_fn = runner or subprocess.run
+    try:
+        proc = exec_fn(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "timeout",
+            "reset": reset,
+            "users": {},
+            "detail": f"xray statsquery timed out after {timeout_sec}s",
+        }
+    except OSError as exc:
+        return {
+            "status": "unavailable",
+            "reset": reset,
+            "users": {},
+            "detail": str(exc),
+        }
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip() or f"exit={proc.returncode}"
+        return {
+            "status": "unavailable",
+            "reset": reset,
+            "users": {},
+            "detail": detail,
+        }
+
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        return {
+            "status": "unavailable",
+            "reset": reset,
+            "users": {},
+            "detail": f"invalid statsquery JSON: {exc}",
+        }
+
+    users: dict[str, dict[str, int]] = {}
+    for item in payload.get("stat", []) or []:
+        name = str(item.get("name", ""))
+        parts = name.split(">>>")
+        if len(parts) == 4 and parts[0] == "user" and parts[2] == "traffic":
+            user_name = parts[1]
+            direction = parts[3]
+            if direction in ("uplink", "downlink"):
+                entry = users.setdefault(user_name, {"uplink": 0, "downlink": 0})
+                try:
+                    entry[direction] = int(item.get("value", 0))
+                except (TypeError, ValueError):
+                    pass
+
+    return {
+        "status": "ok",
+        "reset": reset,
+        "users": users,
+        "detail": f"{len(users)} user counter(s) read",
+    }
+
+
+def _active_bridge_clients(state: dict[str, Any]) -> list[dict[str, str]]:
+    """Build active client list from v1 or v2 bridge state, omitting disabled users."""
+    users_map = state.get("users")
+    if isinstance(users_map, dict) and users_map:
+        clients: list[dict[str, str]] = []
+        for uname, uinfo in users_map.items():
+            if not isinstance(uinfo, dict):
+                continue
+            if uinfo.get("disabled", False):
+                continue
+            uid = str(uinfo.get("uuid", "")).strip()
+            if uid:
+                clients.append({"id": uid, "email": uname})
+        return clients
+
+    disabled_set = set(state.get("disabled_users", []) or [])
+    if "owner" in disabled_set:
+        return []
+    return [{"id": state["user_uuid"], "email": "owner"}]
+
+
+def _default_xray_config_test(candidate_path: Path) -> tuple[bool, str]:
+    """Run xray run -test inside marzneshin-xray if the container is running."""
+    try:
+        ps = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except OSError:
+        return True, "docker unavailable (local test mode)"
+    if "marzneshin-xray" not in (ps.stdout or "").splitlines():
+        return True, "marzneshin-xray not running"
+    try:
+        res = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "marzneshin-xray",
+                "/usr/local/bin/xray",
+                "run",
+                "-test",
+                "-config",
+                str(candidate_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "xray -test timed out after 10s"
+    if res.returncode != 0:
+        return False, (res.stderr or res.stdout or f"exit={res.returncode}").strip()
+    return True, (res.stdout or "Configuration OK").strip()
+
+
+def set_user_disabled(
+    state_path: Path,
+    *,
+    name: str,
+    disabled: bool,
+    automated: bool = False,
+    data_dir: Path,
+    credentials_dir: Path,
+    xray_test_fn: Callable[[Path], tuple[bool, str]] | None = None,
+) -> dict[str, Any]:
+    """Toggle a bridge user's disabled flag with ai-owner protection and xray -test pre-flight."""
+    state = load_or_init_state(state_path)
+    if state.get("mode") != "bridge":
+        raise ValueError(
+            "user disable/enable is only supported on Cascade Bridge nodes (mode='bridge')"
+        )
+
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValueError("User name is required")
+
+    candidate_state = json.loads(json.dumps(state))
+    users_map = candidate_state.get("users")
+    if isinstance(users_map, dict) and users_map:
+        if clean_name not in users_map:
+            raise ValueError(f"Unknown user '{clean_name}'")
+        uinfo = users_map[clean_name]
+        profile = str(uinfo.get("profile", "")).strip().lower()
+        if disabled and automated and (profile == "ai-owner" or clean_name == "owner"):
+            raise ValueError(
+                f"Refusing automated disable of protected ai-owner user '{clean_name}'"
+            )
+        uinfo["disabled"] = bool(disabled)
+    else:
+        if clean_name != "owner":
+            raise ValueError(f"Unknown user '{clean_name}' (v1 state only has 'owner')")
+        if disabled and automated:
+            raise ValueError(
+                "Refusing automated disable of protected ai-owner user 'owner'"
+            )
+        disabled_list = set(candidate_state.get("disabled_users", []) or [])
+        if disabled:
+            disabled_list.add("owner")
+        else:
+            disabled_list.discard("owner")
+        candidate_state["disabled_users"] = sorted(disabled_list)
+
+    xray_cfg = LocalXrayConfigBuilder.build_bridge(
+        bridge_sni=candidate_state.get("bridge_sni") or candidate_state["domain"],
+        reality_private_key=candidate_state["reality_private_key"],
+        reality_short_ids=[candidate_state["reality_short_id"]],
+        clients=_active_bridge_clients(candidate_state),
+        upstream_ip=candidate_state["upstream_ip"],
+        upstream_domain=candidate_state["upstream_domain"],
+        upstream_uuid=candidate_state["upstream_uuid"],
+        upstream_public_key=candidate_state["upstream_public_key"],
+        upstream_short_id=candidate_state["upstream_short_id"],
+        upstream_transport=candidate_state.get("upstream_transport", "vision"),
+        upstream_xhttp_path=candidate_state.get("upstream_xhttp_path", ""),
+        listen_port=XRAY_LISTEN_PORT,
+        fallback_port=NGINX_HTTPS_FALLBACK_PORT,
+        api_address=XRAY_API_ADDRESS,
+    )
+
+    xray_cfg_path = Path(
+        os.environ.get("XRAY_CONFIG_PATH", str(data_dir / "xray" / "config.json"))
+    )
+    xray_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path = xray_cfg_path.with_suffix(".json.bak")
+    candidate_path = xray_cfg_path.with_name(f"{xray_cfg_path.stem}.candidate.json")
+    if xray_cfg_path.exists():
+        shutil.copy2(xray_cfg_path, backup_path)
+
+    candidate_path.write_text(
+        json.dumps(xray_cfg, indent=2) + "\n", encoding="utf-8"
+    )
+
+    test_fn = xray_test_fn or _default_xray_config_test
+    ok, detail = test_fn(candidate_path)
+    if not ok:
+        try:
+            candidate_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if backup_path.exists():
+            shutil.copy2(backup_path, xray_cfg_path)
+        raise RuntimeError(
+            f"xray -test failed; rolled back live config untouched: {detail}"
+        )
+
+    os.replace(candidate_path, xray_cfg_path)
+    save_state(state_path, candidate_state)
+    return candidate_state
+
+
 def apply_state(
     state: dict[str, Any],
     *,
@@ -249,7 +493,7 @@ def apply_state(
             bridge_sni=state.get("bridge_sni") or state["domain"],
             reality_private_key=state["reality_private_key"],
             reality_short_ids=[state["reality_short_id"]],
-            clients=[{"id": state["user_uuid"], "email": "owner"}],
+            clients=_active_bridge_clients(state),
             upstream_ip=state["upstream_ip"],
             upstream_domain=state["upstream_domain"],
             upstream_uuid=state["upstream_uuid"],
@@ -383,6 +627,27 @@ def main(argv: list[str] | None = None) -> int:
     p_decoy = sub.add_parser("decoy", help="Switch decoy preset or reverse-proxy URL")
     p_decoy.add_argument("target")
 
+    p_stats = sub.add_parser(
+        "stats",
+        help="Query loopback in-memory Xray per-user byte counters (bridge mode, 0 disk logs)",
+    )
+    p_stats.add_argument("--reset", action="store_true", help="Reset counters after read")
+    p_stats.add_argument("--timeout", type=float, default=3.0)
+    p_stats.add_argument("--server", default=XRAY_API_ADDRESS)
+    p_stats.add_argument("--container", default="marzneshin-xray")
+
+    p_user = sub.add_parser(
+        "user",
+        help="Reversible quarantine toggle for bridge users (disable/enable with xray -test pre-flight)",
+    )
+    p_user.add_argument("action", choices=["disable", "enable"])
+    p_user.add_argument("name")
+    p_user.add_argument(
+        "--automated",
+        action="store_true",
+        help="Enforce hard ai-owner whitelist protection for automated callers",
+    )
+
     args = parser.parse_args(argv)
     data_dir = Path(args.data_dir)
     credentials_dir = Path(args.credentials_dir)
@@ -493,6 +758,35 @@ def main(argv: list[str] | None = None) -> int:
         state["entropy_seed"] = secrets.token_hex(24)
         save_state(state_path, state)
         apply_state(state, data_dir=data_dir, credentials_dir=credentials_dir)
+    elif args.cmd == "stats":
+        result = query_xray_user_stats(
+            server=args.server,
+            reset=bool(args.reset),
+            timeout_sec=args.timeout,
+            container=args.container,
+        )
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    elif args.cmd == "user":
+        set_user_disabled(
+            state_path,
+            name=args.name,
+            disabled=(args.action == "disable"),
+            automated=bool(args.automated),
+            data_dir=data_dir,
+            credentials_dir=credentials_dir,
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "action": args.action,
+                    "user": args.name,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
     else:
         return 1
 

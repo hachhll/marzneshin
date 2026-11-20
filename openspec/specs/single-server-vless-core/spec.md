@@ -31,11 +31,15 @@ The system SHALL configure `xray-core` exclusively with `vless` inbounds (`vless
 - **THEN** the `:443` client inbound remains `VLESS + TCP + Reality + Vision` (`dest: "127.0.0.1:8443"`), while the `proxy` outbound uses `network: "xhttp"`, `security: "reality"` (`fingerprint: "firefox"`), `flow: ""`, and `xhttpSettings` (`path: "/<64-hex>"`, `mode: "stream-up"`, `xPaddingBytes: "100-1000"`, `xmux` with `maxConcurrency: "16-32"`, `hMaxRequestTimes: "600-900"`, `hMaxReusableSecs: "1800-3000"`), with `freedom`/`direct` absent
 
 ### Requirement: Elimination of traffic accounting and connection metadata
-The system SHALL NOT configure `StatsService`, traffic policy counters, access logs, error logs, or connection metadata tracking.
+The system SHALL keep `log.access`, `log.error`, and `log.loglevel` set to `"none"` with zero disk logging and zero client IP or destination-domain tracking on all nodes. In `exit` mode, `StatsService` and `policy` SHALL remain completely absent. In `bridge` mode only, the system MAY enable loopback-only (`127.0.0.1:10085`) in-memory `StatsService` with `policy.levels.0` (`statsUserUplink: true`, `statsUserDownlink: true`) solely for bounded, reset-on-read per-user byte totals in RAM without persisting any traffic history or connection metadata to disk.
 
 #### Scenario: Xray configuration disables all logging and statistics
-- **WHEN** the Xray configuration is validated
+- **WHEN** the Xray configuration is validated in `exit` mode
 - **THEN** `log.access`, `log.error`, and `log.loglevel` are set to `"none"` and neither `stats` nor `policy` sections are present
+
+#### Scenario: Bridge Xray configuration permits loopback-only in-memory byte counters without disk logs
+- **WHEN** the Xray configuration is validated in `bridge` mode with per-user watchdog stats enabled
+- **THEN** `log.access`, `log.error`, and `log.loglevel` remain `"none"`, `api` binds strictly to `127.0.0.1:10085` with `StatsService`, `policy.levels.0` tracks only `statsUserUplink`/`statsUserDownlink` in RAM, and zero client IPs, domains, or disk log files are recorded
 
 ### Requirement: Pinned Xray-core runtime with verified sing-box cascade compatibility
 The container runtime SHALL pin `XRAY_VERSION=v26.6.27` with compatible `protobuf>=5.27.0` gRPC bindings, ensuring full VLESS Reality + Vision handshake compatibility across `sing-box 1.12+` client -> Cascade Bridge -> Exit Xray topologies verified by isolated E2E regression tests.

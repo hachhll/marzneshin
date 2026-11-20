@@ -476,9 +476,18 @@ class LocalXrayConfigBuilder:
                 "error": "none",
                 "loglevel": "none",
             },
+            "stats": {},
+            "policy": {
+                "levels": {
+                    "0": {
+                        "statsUserUplink": True,
+                        "statsUserDownlink": True,
+                    }
+                }
+            },
             "api": {
                 "tag": API_INBOUND_TAG,
-                "services": ["HandlerService"],
+                "services": ["HandlerService", "StatsService"],
             },
             "dns": {
                 "servers": list(SAFE_DNS_SERVERS),
@@ -604,14 +613,46 @@ def validate_xray_config(
             "Xray logging must be disabled (access/error/loglevel = none)"
         )
 
-    if "stats" in config or "policy" in config:
-        raise ValueError(
-            "StatsService and traffic policy counters are prohibited"
-        )
+    outbounds = config.get("outbounds", [])
+    outbound_tags = {o.get("tag") for o in outbounds}
+    detected_mode = mode or (
+        "bridge" if "proxy" in outbound_tags else "exit"
+    )
 
     api_services = config.get("api", {}).get("services", [])
-    if "StatsService" in api_services:
-        raise ValueError("StatsService is prohibited")
+    has_stats_or_policy = (
+        "stats" in config
+        or "policy" in config
+        or "StatsService" in api_services
+    )
+    if detected_mode != "bridge":
+        if "stats" in config or "policy" in config:
+            raise ValueError(
+                "StatsService and traffic policy counters are prohibited"
+            )
+        if "StatsService" in api_services:
+            raise ValueError("StatsService is prohibited")
+    elif has_stats_or_policy:
+        api_inb = next(
+            (i for i in config.get("inbounds", []) if i.get("tag") == API_INBOUND_TAG),
+            None,
+        )
+        if not api_inb or api_inb.get("listen") != "127.0.0.1":
+            raise ValueError(
+                "Bridge StatsService API inbound must bind strictly to loopback 127.0.0.1"
+            )
+        policy_cfg = config.get("policy", {})
+        if policy_cfg:
+            if set(policy_cfg.keys()) - {"levels"}:
+                raise ValueError(
+                    "Bridge policy may only configure per-user levels counters"
+                )
+            level0 = policy_cfg.get("levels", {}).get("0", {})
+            allowed_level_keys = {"statsUserUplink", "statsUserDownlink"}
+            if set(level0.keys()) - allowed_level_keys:
+                raise ValueError(
+                    "Bridge policy.levels.0 may only enable statsUserUplink/statsUserDownlink"
+                )
 
     dns_cfg = config.get("dns", {})
     if "clientIp" in dns_cfg:
@@ -624,12 +665,6 @@ def validate_xray_config(
         and dns_cfg.get("queryStrategy") != expected_strategy
     ):
         raise ValueError(f"DNS queryStrategy must be {expected_strategy}")
-
-    outbounds = config.get("outbounds", [])
-    outbound_tags = {o.get("tag") for o in outbounds}
-    detected_mode = mode or (
-        "bridge" if "proxy" in outbound_tags else "exit"
-    )
 
     if detected_mode == "bridge":
         if outbound_tags != {"proxy", "block"}:

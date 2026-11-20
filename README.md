@@ -229,3 +229,41 @@ scp /tmp/appliance.tar.gz root@<IP_МОСКВЫ>:/root/appliance.tar.gz
 - [test_cascade_e2e.py](./tests/test_cascade_e2e.py) — пересобирает образ из `Dockerfile` и в изолированной локальной цепочке (`sing-box -> Bridge -> Exit + Nginx`) проверяет реальный Reality-хендшейк (`hs.c.isHandshakeComplete.Load(): true`). Если новая версия `Xray` несовместима с `sing-box`, тест упадёт до выкладки на серверы.
 - [test_client_profiles.py](./tests/test_client_profiles.py) — проверяет инварианты генерации всех клиентских JSON (`Full Tunnel` и `Selective` для Windows 11 Throne `1.13+` и Android `sing-box 1.14+/1.15+`), правила `podkop`, блокировку телеметрии/IPv6/QUIC/STUN и отсутствие устаревших полей (`stack`, `store_rdrc`).
 - [test_xray_config.py](./tests/test_xray_config.py) — проверяет инварианты моста (`AsIs` без утечки DNS в РФ, `Zero-Loop`, `tcpMptcp: false`, отсутствие `freedom`).
+
+
+---
+
+## Пассивный мониторинг кластера (`tools/cluster_watch.py`)
+
+Для безопасной проверки состояния связки `Клиент -> Мост (mos) -> Выходы (exit-*)` без пингов, прозвонов и дисковых логов используется локальный SSH-скрипт [`tools/cluster_watch.py`](./tools/cluster_watch.py).
+
+- **Zero-Emission на `mos`:** все SSH-опросы инициируются строго с рабочей станции администратора; на серверах не пишется **0 байт на диск** (снимок предыдущих значений атомарно перезаписывается локально в `~/.cache/marzneshin-watch/snapshot.json`).
+- **In-memory статистика по пользователям (только на мосту):** на `mos` включён loopback-only `StatsService` (`127.0.0.1:10085`, `statsUserUplink`/`statsUserDownlink` в RAM, `< 100 КБ` на 20 пользователей, `log.access/error/loglevel = "none"`). На немецких выходах `StatsService` запрещён.
+- **Защита от зависаний и штормов:** блокировка `flock` от наложения запусков, `ConnectTimeout=8s`, таймаут команды `15s`, loopback gRPC `3s`, **0 циклов ретраев** (при недоступности — сразу `[UNREACHABLE]`).
+
+### Ручной запуск (Этап 1 — 100% read-only)
+
+```bash
+# Базовая пассивная проверка mos + server-de (дельты nstat, контейнеры, RAM, in-memory трафик)
+python3 tools/cluster_watch.py
+
+# Проверка со сбросом счётчиков трафика в RAM (удобно при запуске раз в 3-4 часа)
+python3 tools/cluster_watch.py --reset-stats
+
+# Проверка нескольких зарубежных выходов
+python3 tools/cluster_watch.py --nodes mos:bridge server-de:exit exit-ai:exit exit-media-2:exit --reset-stats
+
+# Показать пример systemd --user таймера на будущее (Этап 2, ничего не устанавливает)
+python3 tools/cluster_watch.py --print-systemd-example
+```
+
+### Команды на мосту (`mos`)
+
+```bash
+# Локальный опрос in-memory счётчиков (timeout 3s, 0 логов на диск)
+cd /opt/marzneshin && sudo ./script.sh stats --reset
+
+# Обратимый карантин пользователя (с бэкапом config.json.bak и проверкой xray run -test до перезапуска)
+cd /opt/marzneshin && sudo ./script.sh user disable <name>
+cd /opt/marzneshin && sudo ./script.sh user enable <name>
+```

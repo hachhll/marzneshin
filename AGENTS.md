@@ -75,10 +75,15 @@ These rules apply **unconditionally** to every session, diagnostic check, code e
 
 ## 5. Safe Passive Diagnostics Playbook
 
-Use ONLY passive commands over SSH (`ssh mos`, `ssh server-de` via `~/.ssh/config`):
+Use ONLY passive commands from the workstation or over SSH (`ssh mos`, `ssh server-de` via `~/.ssh/config`):
 
 ```bash
-# Passive health & kernel counters (zero network emission)
+# Recommended one-command passive delta check from workstation (0 server disk writes, 0 retries)
+python3 tools/cluster_watch.py
+# Or reset bridge in-memory byte counters after reading (3-4h window)
+python3 tools/cluster_watch.py --reset-stats
+
+# Direct passive health & kernel counters over SSH (zero network emission)
 sudo docker ps --format "table {{.Names}}\t{{.Status}}"
 sudo docker exec marzneshin-nginx nginx -v
 nstat -az TcpExtEmbryonicRsts TcpExtTCPTimeouts TcpExtTCPSynRetrans TcpExtTCPAbortOnTimeout
