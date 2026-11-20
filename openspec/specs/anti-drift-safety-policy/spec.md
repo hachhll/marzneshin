@@ -7,15 +7,15 @@ Enforces server, client-profile, and preflight safety invariants that protect ag
 ## Requirements
 
 ### Requirement: Single-IP native IPv4 egress without secondary tunnels
-In `exit` mode, the proxy engine SHALL route all allowed outbound traffic solely through a direct `freedom` outbound (`domainStrategy: "UseIPv4"` by default with mandatory keepalive/`tcpMptcp: false` `sockopt`) bound to the server's static IP and SHALL prohibit Cloudflare WARP, Tor, WireGuard, or arbitrary third-party proxy chains. In `bridge` mode, the proxy engine SHALL route all allowed outbound traffic solely through the single configured `vless` Reality outbound pointing to the owner's dedicated exit node IP (`<upstream_ip>:443`) using `firefox` uTLS by default (`mux` disabled) and SHALL omit `freedom` (`direct`) outbounds so zero traffic can leak onto the domestic bridge network.
+In `exit` mode, the proxy engine SHALL route all allowed outbound traffic solely through a direct `freedom` outbound (`domainStrategy: "UseIPv4"` by default with mandatory keepalive/`tcpMptcp: false` `sockopt`) bound to the server's static IP and SHALL prohibit Cloudflare WARP, Tor, WireGuard, or arbitrary third-party proxy chains. In `bridge` mode, the proxy engine SHALL route all allowed outbound traffic solely through the single configured `vless` Reality outbound pointing to the owner's dedicated exit node IP (`<upstream_ip>:443`) using `firefox` uTLS by default (supporting either `"vision"` TCP with `mux` disabled or `"xhttp"` with `mode: "stream-up"`, `xPaddingBytes: "100-1000"`, and `xmux` rotation) and SHALL omit `freedom` (`direct`) outbounds so zero traffic can leak onto the domestic bridge network.
 
 #### Scenario: Rendered engine config uses direct IPv4 freedom only
 - **WHEN** the server Xray configuration is generated or validated in `exit` mode
 - **THEN** outbounds contain only `direct` (`freedom` with `UseIPv4` and `sockopt` setting `tcpMptcp: false`) and `block` (`blackhole`), and any secondary tunnel protocol is rejected
 
 #### Scenario: Rendered engine config uses fail-closed upstream VLESS only in bridge mode
-- **WHEN** the server Xray configuration is generated or validated in `bridge` mode
-- **THEN** outbounds contain only `proxy` (`vless` Reality to `<upstream_ip>:443` with default `fingerprint: "firefox"`, `sockopt.tcpMptcp: false`, and no `mux`) and `block` (`blackhole`), and `freedom` (`direct`) is absent
+- **WHEN** the server Xray configuration is generated or validated in `bridge` mode (in either `vision` or `xhttp` upstream transport mode)
+- **THEN** outbounds contain only `proxy` (`vless` Reality to `<upstream_ip>:443` with default `fingerprint: "firefox"`, `sockopt.tcpMptcp: false`, and either `network: "tcp"` without `mux` or `network: "xhttp"` with `xPaddingBytes` and `xmux`) and `block` (`blackhole`), and `freedom` (`direct`) is absent
 
 ### Requirement: AI-safe telemetry, QUIC, STUN, and BitTorrent blackhole rules
 Both server `xray` configs and generated client configs SHALL route Wi-Fi/cell geolocation telemetry, `QUIC` (`UDP :443`), WebRTC `STUN` (`UDP :3478, :19302`), `bittorrent`, and private IP ranges to `blackhole`, while allowing `gvt1.com` and `gvt2.com` so Google Antigravity and Chrome binary updates succeed.
