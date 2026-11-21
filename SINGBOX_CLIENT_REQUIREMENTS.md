@@ -103,3 +103,38 @@
    - На **Windows (`Throne 1.13`)**: использовать `"download_detour": "proxy"` до обновления встроенного ядра Throne на `1.14+`.
 4. На **Android** в `route` указывать `"override_android_vpn": true` (не добавлять его в Windows-конфиг).
 5. Во всех правилах `dns.rules` и `route.rules` явно задавать `"action"` (`"route"`, `"reject"`, `"sniff"`, `"hijack-dns"`).
+
+---
+
+## 5. Особенности и требования для iOS (`sing-box MT` / SFI) и OpenWrt (`podkop` + `sing-box`)
+
+*(Платформенные профили iOS и OpenWrt запланированы в [`openspec/changes/multi-exit-bridge-cluster/`](./openspec/changes/multi-exit-bridge-cluster/proposal.md); ниже зафиксированы обязательные требования к клиентскому ПО, формату JSON и настройке ОС.)*
+
+### 5.1. iOS (`sing-box MT` / SFI `>= 1.14`)
+
+1. **Официальный клиент в App Store:**
+   - Использовать **только** официальный ванильный клиент SagerNet — **`sing-box MT`** (издатель *Metamerism LLC*; заменил удалённый ранее `sing-box VT`). Если приложение скрыто в российском App Store, устанавливать через зарубежный Apple ID (US/EU/KZ).
+   - **Запрещены** сторонние обёртки (`v2rayTun`, `Streisand`, `Shadowrocket` и т.п.) и импорт голых `vless://` ссылок для пользователей `media-consumer`.
+2. **Способ доставки и импорта профиля (Zero-Surface, без `/sub/`):**
+   - Поскольку HTTP-подписки (`/sub/`) запрещены, индивидуальный JSON-файл (`ios-media-selective.json` или `ios-singbox*.json`) передаётся пользователю файлом (AirDrop / «Файлы» / iCloud Drive).
+   - В `sing-box MT`: **Profiles $\rightarrow$ `+` $\rightarrow$ Local $\rightarrow$ Import** (выбор `.json` из «Файлов» или вставка JSON). Режим **Remote** не используется.
+3. **Обязательные отличия iOS-профиля (лимит 50 MB RAM `NetworkExtension`):**
+   - **Исключить** Android/Windows-поля: `package_name`, `process_name`, `override_android_vpn`, `interface_name`.
+   - **Не загружать** тяжёлые `.srs`-наборы (особенно `russia_inside.srs`), чтобы процесс `NetworkExtension` гарантированно не падал по OOM в рамках потолка 50 MB RAM на iOS.
+   - Для `media-consumer` (`ios-media-selective.json`) маршрутизация строится компактно по доменам и CIDR только для YouTube, Instagram, Telegram, TikTok, WhatsApp (`route.final: "direct"`, `dns.final: "dns-local"`), с обязательным `reject` для `UDP 443/3478/19302`, `query_type: "HTTPS"`, `BitTorrent`, `::/0` и телеметрии.
+4. **Гигиена iOS:**
+   - На iPhone невозможно разделение по `package_name` приложений — защиту от «приложений-стукачей» обеспечивают доменный `Selective`-профиль и серверный `blackhole` РФ-назначений на зарубежном Exit-узле.
+   - Отключить **iCloud Private Relay («Частный узел iCloud»)** и сторонние DoH/DNS-профили в настройках iOS во избежание конфликта с `TUN` и утечек DNS.
+
+### 5.2. OpenWrt (`podkop` + `sing-box` или чистый сервис `sing-box`)
+
+1. **Почему нельзя копировать десктопный/мобильный JSON на OpenWrt:**
+   - Прямое копирование `throne-windows11.json` или `android-singbox.json` на роутер несовместимо с архитектурой OpenWrt: десктопный `tun` (`auto_route: true` + `strict_route: true` + `hijack-dns`) конфликтует с транзитным трафиком `br-lan -> wan`, зонами `firewall4` (`nftables`) и встроенным `dnsmasq` на порту `53`, что приводит к DNS-петлям или потере доступа в интернет/к роутеру; кроме того, 7 удалённых `.srs`-списков могут вызвать OOM на роутерах с малым объёмом RAM (`128–256 MB`).
+2. **Вариант А (рекомендуемый): `podkop` + `openwrt-outbound.json`**
+   - Пакет **`podkop`** сам устанавливает ванильный **`sing-box`** и нативно связывает его с `firewall4` (`nftables`) и `dnsmasq`.
+   - В `podkop` передаётся **только** секция `outbound` нашего моста (`openwrt-outbound.json`: `VLESS + Reality + Vision`, `fp=firefox`, `xudp`, keepalive, без `urltest`), а не полный десктопный профиль.
+   - На уровне `podkop` / `fw4` / `dnsmasq` обязательно обеспечить блокировку `UDP 443` (`QUIC`), `UDP 3478/19302` (`STUN`/WebRTC), `::/0` (IPv6), телеметрии и DNS-записей типа `HTTPS` (SVCB/HTTP3).
+3. **Вариант Б (без `podkop`): чистый пакет `sing-box` + роутерный `openwrt-singbox.json`**
+   - Официальный сервис `sing-box` на OpenWrt настраивается через специальный роутерный конфиг (`tproxy` + `nftables` на `br-lan` либо роутерный `tun` с явной firewall-зоной и интеграцией с `dnsmasq`), без слепого копирования клиентского `auto_route`.
+4. **Изоляция LAN от контура `exit-ai`:**
+   - Роутер относится к контуру **`ai-owner`**. Запрещено включать общесетевой `Full Tunnel` на весь домашний Wi-Fi через `exit-ai` (чтобы смартфоны, ТВ и гости с российскими приложениями и телеметрией не загрязняли AI-выход). На роутере используется строго **`Selective`** или отдельный VLAN / PBR только для доверенных рабочих устройств.

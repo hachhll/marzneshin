@@ -71,11 +71,12 @@ These rules apply **unconditionally** to every session, diagnostic check, code e
   - Separate `exit-ai` and `exit-media-*` not only by registrable root domain, but also by `/24` IPv4 subnet and ideally distinct ASN/hoster (mitigates ~80% subnet-level contagion from VPS neighbors).
   - If `cluster_watch.py` or handshake checks indicate an active IP/TLS quarantine (sharp `TCPSynRetrans`/`TCPTimeouts` spike or handshake drop while TCP/SSH works), **immediately halt client traffic and disable auto-reconnects** on that node — never flood VLESS packets into a 3–7 day quarantine, or it escalates to a permanent ban.
 - **`media-consumer` role (up to ~20 devices across `exit-media-*`, ~8–10 per exit):**
-  - Strictly mobile-only: vanilla **`sing-box >= 1.14`** on **Android (SFA)** and **iOS (SFI)** with per-user versioned JSON (`media-selective`).
+  - Strictly mobile-only: vanilla **`sing-box >= 1.14`** on **Android (SFA)** and **iOS (SFI — App Store `sing-box MT` by Metamerism LLC, replacing removed `sing-box VT`)** with per-user versioned JSON (`media-selective`), imported manually as a **Local** profile (zero `/sub/` Remote URLs, no `v2rayTun`/`Streisand`/`Shadowrocket`).
   - Proxy ONLY: YouTube, Instagram, Telegram, TikTok, WhatsApp (`route.final: "direct"`, `dns.final: "dns-local"`).
-  - iOS profiles MUST omit `package_name`, `override_android_vpn`, `interface_name`, and oversized `.srs` lists (Apple 50 MB NetworkExtension RAM ceiling).
+  - iOS profiles MUST omit `package_name`, `process_name`, `override_android_vpn`, `interface_name`, and oversized `.srs` lists (Apple 50 MB NetworkExtension RAM ceiling); disable **iCloud Private Relay** and conflicting third-party DNS/DoH profiles on iOS devices.
 - **`ai-owner` role (strictly 1 admin -> `exit-ai`):**
-  - Full 5-OS suite: Android (SFA), iOS (SFI), Windows 11 (Throne), Linux (`sing-box` / `xray-client`), OpenWrt (`sing-box` + `podkop` outbound).
+  - Full 5-OS suite: Android (SFA), iOS (SFI / `sing-box MT` Local import), Windows 11 (Throne), Linux (`sing-box` / `xray-client`), OpenWrt (`podkop` + standalone `openwrt-outbound.json` OR router-native `openwrt-singbox.json` using `tproxy`/`fw4`-integrated `tun`).
+  - Never copy desktop/mobile `auto_route` JSON verbatim to OpenWrt (conflicts with `fw4`/`nftables` and `dnsmasq`, plus `.srs` RAM limits); never route an entire household LAN in `Full Tunnel` through `exit-ai` (use `Selective` or dedicated VLAN/PBR for trusted work devices, and enforce `UDP 443/3478/19302`, `HTTPS` DNS RR, `::/0`, and telemetry blocks on the router).
   - Full Tunnel and AI-Selective profiles (see [SINGBOX_CLIENT_REQUIREMENTS.md](./SINGBOX_CLIENT_REQUIREMENTS.md)).
 - **Multi-exit bridge capacity:** Target `2 GB RAM + 1 GB swap` on `mos` before scaling past 2–3 users; static `UUID -> upstream` binding via SSH CLI.
 
