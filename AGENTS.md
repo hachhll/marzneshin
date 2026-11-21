@@ -34,12 +34,12 @@ These rules apply **unconditionally** to every session, diagnostic check, code e
 
 | Component | Mandatory Invariant | Reason |
 | :--- | :--- | :--- |
-| **Cascade Topology** | `Client (VLESS+TCP+Reality+Vision, fp=firefox)` -> `Moscow Bridge (:443, AsIs)` -> `DE Exit (VLESS+XHTTP+Reality+xmux, :443 -> fallback 127.0.0.1:10086)` | Resistant to Russia TSPU/DPI; hides domestic clients behind RU bridge and obfuscates cross-border hop via XHTTP+xmux. |
+| **Cascade Topology** | `Client (VLESS+TCP+Reality+Vision, fp=firefox)` -> `Moscow Bridge (:443, AsIs)` -> `DE Exit (VLESS+XHTTP+Reality+xmux, :443 -> fallback 127.0.0.1:10086)` | Resistant to Russia TSPU/DPI; hides domestic clients behind RU bridge and obfuscates cross-border hop via XHTTP+xmux (keep `xmux.hMaxReusableSecs` bounded to minutes, not multi-hour sessions, when scaling). |
 | **Xray Version** | Pinned to **`Xray v26.6.27`** (`Dockerfile`) | `v26.9.8+` enforces PQ `X25519MLKEM768` breaking `sing-box 1.13/1.14` (`SagerNet/sing-box#4520`). Upgrade only after passing `tests/test_cascade_e2e.py`. |
 | **Nginx Version** | Pinned to **`nginx:1.30.7-alpine`** or newer patched release (`docker/nginx/Dockerfile`) | Mitigates critical RCE `CVE-2026-123007`. Recreate Nginx with `--no-deps` so `marzneshin-xray` has 0s downtime. |
 | **uTLS Fingerprint** | Default **`fp=firefox`** everywhere | Empirically verified on RU ISPs (`fp=chrome` is throttled/dropped by TSPU). |
 | **MPTCP Hardening** | `net.mptcp.enabled = 0` (`sysctl`) + `"tcpMptcp": false` in all Xray `sockopt` | Mitigates `CVE-2026-98432` and DPI TCP option anomalies. |
-| **TCP Anti-Storm** | Bilateral `TCPMSS --set-mss 1360` (`iptables -t mangle`), `tcp_retries2 = 5`, `tcp_fin_timeout = 15`, `tcp_syn_retries = 2`, `tcp_synack_retries = 2`, `tcp_max_syn_backlog = 4096`, `tcp_syncookies = 1`, `bbr + fq`, `disable_ipv6 = 1`, `sockopt` keepalive (`120s/30s`, `tcpNoDelay=true`) | Prevents hanging sockets and `TCPTimeouts` reconnect storms that trigger TSPU active probing. |
+| **TCP Anti-Storm** | Bilateral `TCPMSS --set-mss 1360` (`iptables -t mangle`), `tcp_retries2 = 5`, `tcp_fin_timeout = 15`, `tcp_syn_retries = 1`, `tcp_synack_retries = 2`, `tcp_max_syn_backlog = 4096`, `tcp_syncookies = 1`, `bbr + fq`, `disable_ipv6 = 1`, `sockopt` keepalive (`120s/30s`, `tcpNoDelay=true`) | Prevents hanging sockets and `TCPTimeouts` reconnect storms that trigger TSPU active probing. |
 | **Probe Isolation** | `dest: "127.0.0.1:8443"` (`xver: 1`, Zero-Loop), Nginx `default_server` returns neutral `CN=localhost` + `444` (never `TLS alert 80`), `server_tokens off`, `etag off`, `Last-Modified ""`, `0644` file permissions, `:80` closed on `mos` after ACME | Defeats active TSPU probing and raw-IP/no-SNI fingerprinting. |
 
 ---
@@ -53,7 +53,9 @@ These rules apply **unconditionally** to every session, diagnostic check, code e
   - `bittorrent`
   - `::/0` (IPv6) and private CIDRs (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `100.64.0.0/10`)
   - Telemetry domains: `location.googleapis.com`, `connectivitycheck.android.com`, `connectivitycheck.gstatic.com`, `app-measurement.com`, `firebase-settings.crashlytics.com` (and `firebaselogging*.googleapis.com` on clients)
-  - DNS `query_type: "HTTPS"` (SVCB/HTTP3 hints) on `sing-box` clients
+  - DNS `query_type: "HTTPS"` (SVCB/HTTP3 hints) on **all** `sing-box` clients (both `Full Tunnel` and `Selective`)
+- **Blocked on foreign Exit nodes (`blackhole` against domestic snitch apps / `Full Tunnel` leaks, zero WARP):**
+  - `domain:ru`, `domain:su`, `domain:xn--p1ai` (`.рф`), and `geoip:ru` MUST route to `block` on foreign Exit nodes (`LocalXrayConfigBuilder.build`), while `mos` keeps `domainStrategy: "AsIs"` and zero `freedom` outbounds.
 - **Explicitly ALLOWED (never blackhole):**
   - `gvt1.com` and `gvt2.com` (required for Google/IDE binary updates).
 
@@ -61,7 +63,13 @@ These rules apply **unconditionally** to every session, diagnostic check, code e
 
 ## 4. Client & Cluster Standards
 
+- **Mandatory Next Milestone (Blocking Prerequisite before `>2` devices):**
+  - Implement and deploy [`openspec/changes/multi-exit-bridge-cluster/`](./openspec/changes/multi-exit-bridge-cluster/proposal.md) before scaling users/devices or issuing mobile media profiles.
 - **No `urltest`:** Client outbounds MUST use manual `selector` only (`interrupt_exist_connections: true`).
+- **No raw `vless://` / `links.txt` for `media-consumer` users:** Distribute ONLY managed `Selective` `sing-box` JSON profiles (never unrouted raw URIs/QR for `v2rayNG` or unsplit mobile clients). Reserve `links.txt`/QR bootstrapping strictly for `ai-owner`.
+- **Subnet, ASN & Quarantine Discipline:**
+  - Separate `exit-ai` and `exit-media-*` not only by registrable root domain, but also by `/24` IPv4 subnet and ideally distinct ASN/hoster (mitigates ~80% subnet-level contagion from VPS neighbors).
+  - If `cluster_watch.py` or handshake checks indicate an active IP/TLS quarantine (sharp `TCPSynRetrans`/`TCPTimeouts` spike or handshake drop while TCP/SSH works), **immediately halt client traffic and disable auto-reconnects** on that node — never flood VLESS packets into a 3–7 day quarantine, or it escalates to a permanent ban.
 - **`media-consumer` role (up to ~20 devices across `exit-media-*`, ~8–10 per exit):**
   - Strictly mobile-only: vanilla **`sing-box >= 1.14`** on **Android (SFA)** and **iOS (SFI)** with per-user versioned JSON (`media-selective`).
   - Proxy ONLY: YouTube, Instagram, Telegram, TikTok, WhatsApp (`route.final: "direct"`, `dns.final: "dns-local"`).
@@ -105,5 +113,5 @@ Before any code deployment, run local tests:
 ## 6. Reference & Archived Context
 
 - Current client spec: [SINGBOX_CLIENT_REQUIREMENTS.md](./SINGBOX_CLIENT_REQUIREMENTS.md)
-- Active cluster OpenSpec change: [openspec/changes/multi-exit-bridge-cluster/](./openspec/changes/multi-exit-bridge-cluster/)
-- Historical RCA & handovers (archived): [docs/archive/](./docs/archive/) (`RCA_SERVER_FAM_2026-11-15.md`, `RISK_TRACKING_AND_MITIGATION.md`, `DEPLOYMENT_SAFETY_PROTOCOL.md`, `HANDOVER_CONTEXT_2026-11-15.md`, `HANDOVER_CONTEXT_2026-11-16.md`, `DRIFT-TO-XHTTP.md`)
+- Mandatory next OpenSpec change: [openspec/changes/multi-exit-bridge-cluster/](./openspec/changes/multi-exit-bridge-cluster/)
+- Historical RCA & DPI research (archived): [docs/archive/](./docs/archive/) (`RCA_SERVER_FAM_2026-11-15.md`, `RISK_TRACKING_AND_MITIGATION.md`, `DEPLOYMENT_SAFETY_PROTOCOL.md`, `HANDOVER_CONTEXT_2026-11-15.md`, `HANDOVER_CONTEXT_2026-11-16.md`, `DRIFT-TO-XHTTP.md`, `DPI_RESEARCH_HABR_1109052_2026-11-21.md`)

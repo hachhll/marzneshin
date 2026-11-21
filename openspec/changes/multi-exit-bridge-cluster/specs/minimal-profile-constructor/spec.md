@@ -2,12 +2,23 @@
 
 ## MODIFIED Requirements
 
+### Requirement: Local terminal QR code and domain-based VLESS URI export
+Upon installation (`./script.sh --domain <fqdn>` or `./script.sh --bridge ...`), rotation (`./script.sh rotate`), or `ai-owner` status check, the system SHALL print the `ai-owner` `VLESS + Reality + Vision` URI (`links.txt`) and UTF-8 terminal QR code (`fp=firefox`, `packetEncoding=xudp`, connecting to the bridge `:443` with `<bridge_sni>` in `bridge` mode, plus copy-paste `--bridge` commands in `exit` mode), and SHALL NOT generate `links.txt` or raw unrouted QR URIs for `media-consumer` users so mobile devices only receive managed `Media-Selective` `sing-box` JSON profiles.
+
+#### Scenario: Terminal output includes scannable UTF-8 QR code and domain-based xudp VLESS URI
+- **WHEN** `./script.sh status` (or initial install) finishes for the `ai-owner` on an exit node or bridge node
+- **THEN** stdout contains a valid `vless://` URI with `security=reality`, `flow=xtls-rprx-vision`, `fp=firefox`, `packetEncoding=xudp`, a multi-line ISO/IEC 18004 UTF-8 QR code block, and (on an exit node) the copy-paste `--bridge` setup command (plus the `bridge-transport xhttp --path <64-hex>` switch command when XHTTP is enabled)
+
+#### Scenario: `media-consumer` credential directory omits raw `vless://` links
+- **WHEN** credentials are generated for a `media-consumer` user via `user add` or refresh
+- **THEN** `/root/vpn-credentials/users/<user>/` contains only `android-media-selective.json` and `ios-media-selective.json` (plus version metadata), and `links.txt` / raw `vless://` URI output is omitted
+
 ### Requirement: Hardened Windows 11 Throne (`sing-box`) and Android profile generation without simultaneous urltest probing
-The system SHALL generate versioned, per-user client profiles under `/root/vpn-credentials/users/<user>/` tailored strictly to the user's assigned role (`ai-owner` or `media-consumer`), with a manual `selector` outbound (`interrupt_exist_connections: true`, zero `urltest`), `fp=firefox`, explicit TCP keepalive (`connect_timeout: "5s"`, `tcp_keep_alive: "2m"`, `tcp_keep_alive_interval: "30s"`, Xray `tcpMptcp: false`), `sing-box 1.12+`/`1.14+` remote UDP DNS (`1.1.1.1`/`8.8.8.8`, `detour: "proxy"`, `ipv4_only`), and unconditional blocking of `QUIC` (`UDP :443`), `STUN` (`UDP :3478/:19302`), `BitTorrent`, telemetry, private CIDRs, and `::/0`.
+The system SHALL generate versioned, per-user client profiles under `/root/vpn-credentials/users/<user>/` tailored strictly to the user's assigned role (`ai-owner` or `media-consumer`), with a manual `selector` outbound (`interrupt_exist_connections: true`, zero `urltest`), `fp=firefox`, explicit TCP keepalive (`connect_timeout: "5s"`, `tcp_keep_alive: "2m"`, `tcp_keep_alive_interval: "30s"`, Xray `tcpMptcp: false`), `sing-box 1.12+`/`1.14+` remote UDP DNS (`1.1.1.1`/`8.8.8.8`, `detour: "proxy"`, `ipv4_only`, `query_type: "HTTPS"` blocked across both Full-tunnel and Selective profiles), and unconditional blocking of `QUIC` (`UDP :443`), `STUN` (`UDP :3478/:19302`), `BitTorrent`, telemetry, private CIDRs, and `::/0`.
 
 #### Scenario: Generated Throne profile passes strict anti-leak and anti-correlation validation
 - **WHEN** `throne-windows11.json` is generated for the `ai-owner` user
-- **THEN** it contains a `tun` inbound (`auto_route: true`, `strict_route: true`) without `override_android_vpn`, uses `sing-box 1.12+` DNS server objects (`type: "udp"`, `detour: "proxy"`, `strategy: "ipv4_only"`) and `action: "sniff"`/`"hijack-dns"`/`"reject"`, configures `firefox` uTLS with keepalive timers on `vless-vision`, uses a `selector` (not `urltest`), blocks `quic` (`UDP :443`), `stun` (`UDP :3478/:19302`), and `::/0`, and omits `dns-local`, `geoip:ru`, and `gvt1.com`/`gvt2.com` blocks
+- **THEN** it contains a `tun` inbound (`auto_route: true`, `strict_route: true`) without `override_android_vpn`, uses `sing-box 1.12+` DNS server objects (`type: "udp"`, `detour: "proxy"`, `strategy: "ipv4_only"`) with `query_type: "HTTPS"` rejected in `dns.rules` and `action: "sniff"`/`"hijack-dns"`/`"reject"`, configures `firefox` uTLS with keepalive timers on `vless-vision`, uses a `selector` (not `urltest`), blocks `quic` (`UDP :443`), `stun` (`UDP :3478/:19302`), and `::/0`, and omits `dns-local`, `geoip:ru`, and `gvt1.com`/`gvt2.com` blocks
 
 #### Scenario: Generated Android profile preserves override_android_vpn and sing-box 1.12+ schema
 - **WHEN** `android-singbox.json` is generated for the `ai-owner` user

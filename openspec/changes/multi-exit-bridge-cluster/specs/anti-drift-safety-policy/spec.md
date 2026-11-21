@@ -25,7 +25,7 @@ Generated `vless://` links and client profiles SHALL enforce `packetEncoding=xud
 
 #### Scenario: Windows 11 Throne and Xray client profiles route all DNS and traffic through proxy
 - **WHEN** the generated `throne-windows11.json` (`sing-box`) and `xray-client.json` Full-tunnel profiles are validated
-- **THEN** all DNS queries use `sing-box 1.12+` remote server objects (`detour: "proxy"`, `strategy: "ipv4_only"`), client outbounds carry keepalive settings (`firefox` uTLS, `tcpMptcp: false` in Xray), `tun` enforces `strict_route: true`, Android-only `override_android_vpn` is omitted from Windows profiles, and zero `dns-local` or country-direct bypass rules exist
+- **THEN** all DNS queries use `sing-box 1.12+` remote server objects (`detour: "proxy"`, `strategy: "ipv4_only"`) with `query_type: "HTTPS"` rejected in `dns.rules`, client outbounds carry keepalive settings (`firefox` uTLS, `tcpMptcp: false` in Xray), `tun` enforces `strict_route: true`, Android-only `override_android_vpn` is omitted from Windows profiles, and zero `dns-local` or country-direct bypass rules exist
 
 #### Scenario: Selective profiles isolate proxied DNS from domestic direct DNS
 - **WHEN** an `ai-owner` AI-Selective or `media-consumer` Media-Selective profile is validated
@@ -33,9 +33,16 @@ Generated `vless://` links and client profiles SHALL enforce `packetEncoding=xud
 
 ## ADDED Requirements
 
+### Requirement: Server-side domestic RU egress blackhole on foreign exit nodes
+In `exit` mode, the proxy engine SHALL block outbound traffic destined for Russian domains (`domain:ru`, `domain:su`, `domain:xn--p1ai`) and Russian IP ranges (`geoip:ru`) via the `block` (`blackhole`) outbound prior to the final `direct` (`freedom`) rule, without introducing Cloudflare WARP or any secondary tunnel, while `bridge` mode continues to enforce `domainStrategy: "AsIs"` with zero `freedom` outbounds.
+
+#### Scenario: Foreign exit node blackholes domestic RU domains and IP ranges
+- **WHEN** a foreign exit node Xray configuration is generated or audited by `validate_xray_config` / `self-test`
+- **THEN** routing rules include a `block` rule for `domain:ru`, `domain:su`, `domain:xn--p1ai`, and `geoip:ru` ahead of the `direct` outbound rule, and zero secondary tunnels (WARP/Tor/WireGuard) exist
+
 ### Requirement: Operational resource and passive audit validation for multi-exit bridges
-Passive Zero-Emission `self-test` on a multi-exit bridge SHALL validate all configured upstreams (zero `freedom` outbounds, zero `ai-isolated` role violations, zero root-domain collisions between `ai-isolated` and `media` exits, and mandatory `UDP 443/3478/19302` blackhole rules) and SHALL emit a non-fatal `WARN:` if a multi-user bridge has less than `1800 MB` RAM or `0 MB` swap configured.
+Passive Zero-Emission `self-test` on a multi-exit bridge SHALL validate all configured upstreams (zero `freedom` outbounds, zero `ai-isolated` role violations, zero root-domain or `/24` subnet collisions between `ai-isolated` and `media` exits, mandatory `UDP 443/3478/19302` blackhole rules, and bounded `xmux` session rotation) and SHALL emit a non-fatal `WARN:` if a multi-user bridge has less than `1800 MB` RAM or `0 MB` swap configured.
 
 #### Scenario: Passive self-test validates multi-exit bridge invariants without emitting traffic
 - **WHEN** `./script.sh self-test` runs on a multi-exit bridge
-- **THEN** it checks all upstream outbounds, `ai-isolated` guards, blackhole rules, and memory/swap headroom purely from local files and `/proc` without emitting any network packets
+- **THEN** it checks all upstream outbounds, `ai-isolated` guards, `/24` subnet separation, blackhole rules, `xmux` rotation bounds, and memory/swap headroom purely from local files and `/proc` without emitting any network packets

@@ -7,26 +7,26 @@ Defines static per-user UUID-to-upstream routing, role-based exit isolation, bac
 ## ADDED Requirements
 
 ### Requirement: Multi-exit static UUID routing on the Cascade Bridge
-In `bridge` mode, the proxy engine SHALL support multiple named `vless` Reality (`XHTTP + xmux` by default) outbounds behind the single `:443` `vless-reality-vision` inbound and SHALL route each client deterministically to its statically bound upstream outbound using `routing.rules` matched by client identity (`user` email/tag) with `domainStrategy: "AsIs"` (zero DNS queries on the bridge) and zero automatic load-balancing or failover between upstreams.
+In `bridge` mode, the proxy engine SHALL support multiple named `vless` Reality outbounds (`XHTTP + xmux` with short minute-scale `hMaxReusableSecs` rotation) behind the single `:443` `vless-reality-vision` inbound and SHALL route each client statically by identity (`user` email) with `domainStrategy: "AsIs"` and zero cross-exit load-balancing or failover.
 
 #### Scenario: Distinct users on the same bridge route to different German exits
 - **WHEN** `owner` is bound to `exit-ai` and `alice` is bound to `exit-media-1` on the bridge
-- **THEN** the rendered Xray configuration contains both `owner` and `alice` UUIDs in the single `:443` inbound, two distinct `XHTTP + Reality + xmux` outbounds (`proxy-exit-ai` and `proxy-exit-media-1`), and `routing.rules` mapping `user: ["owner"] -> proxy-exit-ai` and `user: ["alice"] -> proxy-exit-media-1` with `domainStrategy: "AsIs"` and no `freedom` outbound
+- **THEN** the rendered Xray configuration contains both `owner` and `alice` UUIDs in the single `:443` inbound, two distinct `XHTTP + Reality + xmux` outbounds (`proxy-exit-ai` and `proxy-exit-media-1` with bounded `hMaxReusableSecs` such as `"180-300"`), and `routing.rules` mapping `user: ["owner"] -> proxy-exit-ai` and `user: ["alice"] -> proxy-exit-media-1` with `domainStrategy: "AsIs"` and no `freedom` outbound
 
 #### Scenario: Unbound or unknown user cannot fall through to direct egress
 - **WHEN** a client connection does not match any configured user UUID or explicit upstream route
 - **THEN** the bridge never falls back to a domestic `freedom` outbound and fails closed to `block` or Reality decoy fallback
 
 ### Requirement: Hard isolation guard for `ai-isolated` exit nodes
-Each configured upstream on the bridge SHALL carry an explicit role of either `ai-isolated` or `media`. An upstream with role `ai-isolated` SHALL accept at most one user bound with profile role `ai-owner`, SHALL reject binding any `media-consumer` user or a second user, and SHALL reject or fail validation if its registrable root domain matches any `media` upstream's root domain.
+Each upstream on the bridge SHALL carry a role (`ai-isolated` or `media`). An `ai-isolated` upstream SHALL accept at most one `ai-owner` user, SHALL reject `media-consumer` or second-user bindings, and SHALL reject root-domain or `/24` IPv4 subnet collisions with any `media` upstream (unless explicitly overridden for `/24`).
 
 #### Scenario: Binding a second user or media user to an `ai-isolated` exit is rejected
 - **WHEN** an administrator attempts to bind a `media-consumer` user or a second user to an upstream marked `ai-isolated`
 - **THEN** the CLI rejects the operation with a non-zero exit code and leaves the bridge state and running Xray configuration unchanged
 
-#### Scenario: Root domain collision between `ai-isolated` and `media` upstreams is rejected
-- **WHEN** an administrator registers a `media` upstream whose registrable root domain matches an existing `ai-isolated` upstream (or vice versa)
-- **THEN** the CLI rejects the registration to prevent cross-contour SNI correlation
+#### Scenario: Root domain or `/24` subnet collision between `ai-isolated` and `media` upstreams is rejected
+- **WHEN** an administrator registers a `media` upstream whose registrable root domain or `/24` IPv4 subnet matches an existing `ai-isolated` upstream (or vice versa)
+- **THEN** the CLI rejects the registration to prevent cross-contour SNI or subnet-wide quarantine correlation
 
 ### Requirement: Zero-Surface SSH CLI lifecycle for upstreams and users
 The bridge SHALL provide SSH CLI commands (`upstream add/list/remove/migrate` and `user add/list/show/assign/remove`) that manage named upstreams and per-user UUID bindings atomically without any web panel, HTTP API, or subscription endpoint. Reassigning a user or migrating all users from one `media` upstream to another SHALL update only the bridge routing configuration while preserving each user's existing UUID and client profile untouched.

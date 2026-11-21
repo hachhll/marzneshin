@@ -66,11 +66,12 @@ Strict operational constraints governing this design:
 - **Why:** Deterministic 1-to-1 IP pinning, zero DNS lookups on `mos` (`domainStrategy: "AsIs"`), zero `freedom` outbound, and instant `upstream migrate <from> <to>` without touching client devices.
 - **Alternative considered:** Separate listening ports per exit (`:443`, `:8443`, `:2053`). Rejected because multi-port exposure was a documented TSPU fingerprint in `RCA_SERVER_FAM_2026-11-15.md`.
 
-### 3. Hard `ai-isolated` Guard and Root-Domain Separation
+### 3. Hard `ai-isolated` Guard, Root-Domain & `/24` Subnet Separation
 - **Decision:** Enforce in both CLI mutations and `LocalXrayConfigBuilder` / `self_test`:
   - `role == "ai-isolated"` allows at most `1` bound user, and that user MUST have `profile == "ai-owner"`.
   - Extract registrable root domain (eTLD+1) of every upstream and reject any registration where an `ai-isolated` upstream shares a root domain with a `media` upstream.
-- **Why:** Prevents accidental operator error from routing family/media traffic through the clean AI exit or linking exits via shared parent domain.
+  - Check `/24` IPv4 subnet overlap between `ai-isolated` and `media` upstreams in `upstream add` (rejecting same-`/24` unless explicitly overridden, and recommending distinct ASNs/hosters operationally to mitigate ~80% subnet-wide TSPU contagion from VPS neighbors).
+- **Why:** Prevents accidental operator error from routing family/media traffic through the clean AI exit, linking exits via shared parent domain, or losing `exit-ai` alongside `exit-media-*` in a `/24` subnet quarantine.
 
 ### 4. Role-Specific Vanilla `sing-box` Profile Generation (`media-consumer` vs `ai-owner`)
 - **Decision:** Split profile generation cleanly by role and platform:
@@ -78,12 +79,20 @@ Strict operational constraints governing this design:
     - Proxy ONLY: YouTube (`youtube.com`, `youtu.be`, `googlevideo.com`, `ytimg.com`, `ggpht.com`), Instagram/Meta (`instagram.com`, `cdninstagram.com`, `fbcdn.net`, `facebook.com`), Telegram (domains + official `TELEGRAM_DC_CIDRS`), TikTok (`tiktok.com`, `tiktokv.com`, `tiktokcdn.com`, `tiktokcdn-eu.com`, `byteoversea.com`, `ibytedtos.com`, `muscdn.com`, `musical.ly`), WhatsApp (`whatsapp.com`, `whatsapp.net`, `wa.me`).
     - Android adds `package_name` rules (`com.google.android.youtube`, `com.instagram.android`, `org.telegram.messenger`, `org.telegram.messenger.web`, `org.thunderdog.challegram`, `com.zhiliaoapp.musically`, `com.ss.android.ugc.trill`, `com.whatsapp`, `com.whatsapp.w4b`) and `override_android_vpn: true`.
     - **iOS NetworkExtension safety:** Omit `package_name`, `override_android_vpn`, and `interface_name`. Keep remote `.srs` rule-sets minimal (avoid loading giant multi-megabyte domestic lists like `russia_inside`) so NetworkExtension stays well below Apple's ~50 MB RAM ceiling.
-    - All profiles enforce `UDP 443/3478/19302` reject, `query_type: "HTTPS"` reject, `BitTorrent` reject, `::/0` reject, telemetry reject, `fp=firefox`, manual `selector` only (no `urltest`).
+    - Omit raw `vless://` URIs / `links.txt` / terminal QR export for `media-consumer` users so devices cannot connect via unrouted `v2rayNG` links that leak domestic traffic.
+    - All profiles (including `Full Tunnel`) enforce `UDP 443/3478/19302` reject, `query_type: "HTTPS"` reject in `dns.rules`, `BitTorrent` reject, `::/0` reject, telemetry reject, `fp=firefox`, manual `selector` only (no `urltest`).
   - **`ai-owner` (5 platforms: Android, iOS, Windows 11 Throne, Linux, OpenWrt):**
-    - Keeps existing Full and AI-Selective logic for Android and Windows 11, adds iOS Full/AI-Selective (without Android-only fields), Linux `sing-box` (`tun` + `mixed 127.0.0.1:2080`) + `xray-client.json`, and OpenWrt (`openwrt-singbox.json` + standalone `openwrt-outbound.json` for `podkop`/router configs).
+    - Keeps existing Full and AI-Selective logic for Android and Windows 11 (fixing `Full Tunnel` to also emit `dns.rules` `query_type: "HTTPS"` reject), adds iOS Full/AI-Selective (without Android-only fields), Linux `sing-box` (`tun` + `mixed 127.0.0.1:2080`) + `xray-client.json`, OpenWrt (`openwrt-singbox.json` + standalone `openwrt-outbound.json` for `podkop`/router configs), and admin-only `links.txt` with a warning not to share raw URIs.
 
 ### 5. Bridge Host Capacity Baseline
 - **Decision:** Require `2 GB RAM + 1 GB swap` (and recommend `2 vCPU`) on `mos` before scaling past 2–3 users to ~20 devices across 3+ exits. `self-test` passively checks `/proc/meminfo` and warns if a multi-user bridge has `< 1800 MB` RAM or `0` swap.
+
+### 6. Server-Side Exit RU Blackhole & `xmux` Session Rotation Hardening (Habr #1109052 Audit)
+- **Decision:**
+  - Add a mandatory `block` routing rule on foreign Exit nodes (`LocalXrayConfigBuilder.build`) for `"domain:ru"`, `"domain:su"`, `"domain:xn--p1ai"`, and `"geoip:ru"` (positioned before the final `direct` rule) and enforce it in `validate_xray_config` + `self_test.py`. Meanwhile, `mos` keeps `domainStrategy: "AsIs"` and zero `freedom` outbounds.
+  - Tighten `xmux.hMaxReusableSecs` in `LocalXrayConfigBuilder.build_bridge` from `"1800-3000"` (30–50 min) down to `"180-300"` (3–5 min) so cross-border HTTP/2 Reality sessions rotate frequently instead of forming monolithic multi-hour asymmetric streams under multi-user media load (verified via `tests/test_cascade_e2e.py`).
+  - Document quarantine discipline operationally: if `cluster_watch.py` flags a handshake/retransmission storm, halt traffic immediately instead of retrying through a 3–7 day quarantine.
+- **Why:** Practitioner reports in `DPI_RESEARCH_HABR_1109052_2026-11-21.md` identify domestic "snitch apps" hitting RU endpoints / `ipify` from VPN exits as the #1 trigger of rapid 1–7 day IP bans. Blocking RU destinations at the foreign Exit prevents egress exposure even if a `Full Tunnel` client accidentally accesses a domestic app or tracker — without introducing forbidden WARP chains.
 
 ## Risks / Trade-offs
 
@@ -96,7 +105,7 @@ Strict operational constraints governing this design:
 
 *(Executed only after future implementation via `/opsx-apply`; zero live actions during planning.)*
 1. Upgrade Moscow bridge (`mos`) VPS to `2 GB RAM` and configure `1 GB` swapfile.
-2. Provision new German exit VPS(es) with fresh clean IPv4 and independent root domains using existing `sudo ./script.sh --domain <new-domain>` (no changes needed to exit deployment flow).
+2. Provision new German exit VPS(es) with fresh clean IPv4 in distinct `/24` subnets (ideally separate ASNs/hosters from `exit-ai`) and independent root domains using existing `sudo ./script.sh --domain <new-domain>` (exit deployment automatically inherits the new server-side RU egress blackhole).
 3. Verify new `exit-ai` IP anonymously on the exit node itself (`INNERTUBE_CONTEXT_GL == DE`, `chatgpt.com/cdn-cgi/trace` `loc != RU` & `warp=off`, `api.anthropic.com` TLS 1.3).
 4. Deploy updated codebase to `mos`, auto-migrate v1 `state.json` -> v2 (preserving existing family UUID on current `server-de`), register `exit-ai` (`role: ai-isolated`) and `exit-media-*` (`role: media`).
 5. Create `ai-owner` user bound to `exit-ai` and per-device/per-person `media-consumer` users bound evenly across `exit-media-1` / `exit-media-2` (~8–10 devices per exit).
