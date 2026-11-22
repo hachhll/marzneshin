@@ -63,10 +63,8 @@ def test_cli_upstream_lifecycle_isolation_and_migrate(
     _, pub_ai = generate_reality_keypair()
     sid_ai = generate_short_id()
 
-    # 1. Negative: root-domain collision between ai-isolated and default media upstream -> non-zero & unchanged state
-    snap_state = state_path.read_text(encoding="utf-8")
-    snap_xray = xray_cfg_path.read_text(encoding="utf-8")
-    rc_bad_dom = cli_main(
+    # 1. Shared root domain between ai-isolated and default media upstream -> allowed with warning
+    rc_shared_dom = cli_main(
         [
             "--data-dir",
             str(data_dir),
@@ -74,7 +72,7 @@ def test_cli_upstream_lifecycle_isolation_and_migrate(
             str(creds_dir),
             "upstream",
             "add",
-            "exit-ai",
+            "exit-ai-shared",
             "--role",
             "ai-isolated",
             "--ip",
@@ -93,12 +91,28 @@ def test_cli_upstream_lifecycle_isolation_and_migrate(
             "b" * 64,
         ]
     )
-    assert rc_bad_dom == 1
-    assert state_path.read_text(encoding="utf-8") == snap_state
-    assert xray_cfg_path.read_text(encoding="utf-8") == snap_xray
+    assert rc_shared_dom == 0
+    out_shared = capsys.readouterr()
+    assert "Shared root domain" in out_shared.err
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "upstream",
+                "remove",
+                "exit-ai-shared",
+            ]
+        )
+        == 0
+    )
     capsys.readouterr()
 
     # 2. Negative: /24 subnet overlap with default media upstream -> non-zero & unchanged state
+    snap_state = state_path.read_text(encoding="utf-8")
+    snap_xray = xray_cfg_path.read_text(encoding="utf-8")
     rc_bad_sub = cli_main(
         [
             "--data-dir",

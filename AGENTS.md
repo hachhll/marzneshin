@@ -22,7 +22,7 @@ These rules apply **unconditionally** to every session, diagnostic check, code e
 5. **AI Account Protection (Google / Anthropic / OpenAI):**
    - **NO secondary tunnels:** strictly prohibit Cloudflare WARP, Tor, WireGuard outbounds, or third-party proxy chains.
    - **NO IP Flapping:** never load-balance or auto-failover a user across multiple exit IPs; each user is statically pinned to one exit IP.
-   - **Strict `ai-isolated` exit separation:** keep the owner's AI exit (`exit-ai`) dedicated strictly to 1 user (`ai-owner`) on its own independent root domain, never mixed with media/family traffic.
+   - **Strict `ai-isolated` exit separation:** keep the owner's AI exit (`exit-ai`) dedicated strictly to 1 user (`ai-owner`), never mixed with media/family traffic (separate root domain is recommended, not mandatory).
    - Never use user accounts, cookies, tokens, or `Accept-Language: ru` headers during server checks; new exit IP reputation checks are run **once**, anonymously from the foreign exit node itself.
 6. **Zero-Surface Administration:**
    - SSH CLI only (`./script.sh`, custom SSH port `22222/tcp` with `ufw limit`, key-only auth for `stealth`).
@@ -68,7 +68,7 @@ These rules apply **unconditionally** to every session, diagnostic check, code e
 - **No `urltest`:** Client outbounds MUST use manual `selector` only (`interrupt_exist_connections: true`).
 - **No raw `vless://` / `links.txt` for `media-consumer` users:** Distribute ONLY managed `Selective` `sing-box` JSON profiles (never unrouted raw URIs/QR for `v2rayNG` or unsplit mobile clients). Reserve `links.txt`/QR bootstrapping strictly for `ai-owner`.
 - **Subnet, ASN & Quarantine Discipline:**
-  - Separate `exit-ai` and `exit-media-*` not only by registrable root domain, but also by `/24` IPv4 subnet and ideally distinct ASN/hoster (mitigates ~80% subnet-level contagion from VPS neighbors).
+  - Separate `exit-ai` and `exit-media-*` by `/24` IPv4 subnet and ideally distinct ASN/hoster (mitigates ~80% subnet-level contagion from VPS neighbors); separate root domain is optional/recommended.
   - If `cluster_watch.py` or handshake checks indicate an active IP/TLS quarantine (sharp `TCPSynRetrans`/`TCPTimeouts` spike or handshake drop while TCP/SSH works), **immediately halt client traffic and disable auto-reconnects** on that node — never flood VLESS packets into a 3–7 day quarantine, or it escalates to a permanent ban.
 - **`media-consumer` role (up to ~20 devices across `exit-media-*`, ~8–10 per exit):**
   - Strictly mobile-only: vanilla **`sing-box >= 1.14`** on **Android (SFA)** and **iOS (SFI — App Store `sing-box MT` by Metamerism LLC, replacing removed `sing-box VT`)** with per-user versioned JSON (`media-selective`), imported manually as a **Local** profile (zero `/sub/` Remote URLs, no `v2rayTun`/`Streisand`/`Shadowrocket`).

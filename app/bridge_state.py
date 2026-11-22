@@ -393,10 +393,10 @@ def migrate_bridge_state_v1_to_v2(
 
 
 def validate_bridge_isolation(state: dict[str, Any]) -> list[str]:
-    """Enforce ai-isolated single-owner, profile, root-domain, and /24 subnet guards.
+    """Enforce ai-isolated single-owner, profile, and /24 subnet guards.
 
-    Returns non-fatal operational warnings (e.g. explicitly overridden /24 overlap) and
-    raises ValueError on any hard isolation violation.
+    Returns non-fatal operational warnings (e.g. shared root domain or overridden /24
+    overlap) and raises ValueError on any hard isolation violation.
     """
     if state.get("mode") != "bridge":
         return []
@@ -476,9 +476,9 @@ def validate_bridge_isolation(state: dict[str, Any]) -> list[str]:
         for media_name, media_cfg in media_upstreams:
             media_root = extract_root_domain(media_cfg["domain"])
             if ai_root == media_root:
-                raise ValueError(
-                    f"Root-domain collision: ai-isolated upstream '{ai_name}' ({ai_cfg['domain']}) "
-                    f"and media upstream '{media_name}' ({media_cfg['domain']}) share root domain '{ai_root}'"
+                warnings.append(
+                    f"Shared root domain '{ai_root}' between ai-isolated upstream '{ai_name}' "
+                    f"({ai_cfg['domain']}) and media upstream '{media_name}' ({media_cfg['domain']})"
                 )
             media_net24 = ipv4_slash24(media_cfg["ip"])
             if ai_net24 == media_net24:

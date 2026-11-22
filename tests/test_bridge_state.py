@@ -153,13 +153,14 @@ def test_bridge_isolation_guards_reject_violations_cleanly():
     with pytest.raises(ValueError, match="only 'ai-owner'"):
         validate_bridge_isolation(wrong_profile)
 
-    # 3. Root-domain collision (even across subdomains or multi-label TLDs)
+    # 3. Shared root domain is allowed with a non-fatal operational warning
     assert extract_root_domain("sub1.shared.co.uk") == "shared.co.uk"
     assert extract_root_domain("sub2.shared.co.uk") == "shared.co.uk"
     same_root = json.loads(json.dumps(base))
     same_root["upstreams"]["exit-media-1"]["domain"] = "media.ai-only.org"
-    with pytest.raises(ValueError, match="Root-domain collision"):
-        validate_bridge_isolation(same_root)
+    root_warnings = validate_bridge_isolation(same_root)
+    assert len(root_warnings) == 1
+    assert "ai-only.org" in root_warnings[0]
 
     # 4. /24 IPv4 subnet collision unless explicitly overridden
     assert ipv4_slash24("203.0.113.10") == "203.0.113.0/24"
