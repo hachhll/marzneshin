@@ -64,6 +64,11 @@ run_python_cli() {
     elif command -v python3 >/dev/null 2>&1 && PYTHONPATH="$COMPOSE_PROJECT_DIR" python3 -c "import nacl, cryptography" >/dev/null 2>&1; then
         PYTHONPATH="$COMPOSE_PROJECT_DIR" python3 -m app.cli \
             --data-dir "$DATA_DIR" --credentials-dir "$CREDENTIALS_DIR" "$@"
+    elif [ "${1:-}" != "init" ] && [ "${1:-}" != "init-bridge" ] && \
+        command -v docker >/dev/null 2>&1 && \
+        docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'marzneshin-xray'; then
+        docker exec -i marzneshin-xray python3 -m app.cli \
+            --data-dir "$DATA_DIR" --credentials-dir "$CREDENTIALS_DIR" "$@"
     else
         docker compose -f "${COMPOSE_PROJECT_DIR}/docker-compose.yml" run --build --rm \
             -v "${DATA_DIR}:${DATA_DIR}" \
@@ -519,11 +524,34 @@ check_ports_free() {
 
 configure_ufw_and_kernel() {
     local ssh_ports port
+    local missing_fw=()
+    command -v ufw >/dev/null 2>&1 || missing_fw+=("ufw")
+    command -v iptables >/dev/null 2>&1 || missing_fw+=("iptables")
+
     ssh_ports="$(detect_ssh_ports)"
 
     if [ "$DRY_RUN" -eq 1 ]; then
+        if [ "${#missing_fw[@]}" -gt 0 ]; then
+            log_err "Dry-run: missing required firewall/TCPMSS prerequisite(s): ${missing_fw[*]}"
+            return 1
+        fi
         log_info "Dry-run: detected SSH port(s) ($(printf '%s' "$ssh_ports" | tr '\n' ' ' | sed 's/[[:space:]]*$//')) and verified kernel anti-storm profile."
         return 0
+    fi
+
+    if [ "${#missing_fw[@]}" -gt 0 ]; then
+        if [ "$BRIDGE_MODE" -eq 1 ]; then
+            log_err "Bridge Mode (Zero-Emission): missing required package(s): ${missing_fw[*]}. Install them beforehand and re-run."
+            return 1
+        fi
+        if command -v apt-get >/dev/null 2>&1; then
+            log_info "Installing missing firewall/TCPMSS prerequisite(s): ${missing_fw[*]}..."
+            DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing_fw[@]}"
+        else
+            log_err "Missing required package(s): ${missing_fw[*]} and apt-get is unavailable."
+            return 1
+        fi
     fi
 
     # Persist flush-safe bidirectional TCPMSS = 1360 clamping in /etc/ufw/before.rules across reboots & ufw reload

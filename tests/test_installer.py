@@ -43,6 +43,7 @@ def _setup_mock_bin(
     _write_exec(bin_dir, "dig", f'echo "{resolved_ip}"\n')
     _write_exec(bin_dir, "docker", 'echo "Docker Compose version v2.27.0"\n')
     _write_exec(bin_dir, "ufw", 'echo "Status: inactive"\n')
+    _write_exec(bin_dir, "iptables", "exit 0\n")
     _write_exec(
         bin_dir,
         "curl",
@@ -445,4 +446,104 @@ def test_bridge_mode_zero_emission_installer_and_cli(tmp_path: Path):
     )
     assert res_ok_acme.returncode == 0, res_ok_acme.stderr
     assert "SNI=edge.bridge-example.net, ACME TLS mode" in res_ok_acme.stdout
+
+
+def test_configure_ufw_and_kernel_dry_run_fails_when_missing_prereqs(tmp_path: Path):
+    """Dry-run must fail explicitly when ufw or iptables is missing."""
+    empty_bin = tmp_path / "empty_bin"
+    empty_bin.mkdir()
+    # Provide basic POSIX utilities needed by script.sh, but omit ufw and iptables
+    for tool in ("bash", "awk", "sed", "tr", "grep", "printf", "dirname"):
+        real = shutil.which(tool)
+        if real:
+            (empty_bin / tool).symlink_to(real)
+
+    cmd = [
+        "bash",
+        "-c",
+        (
+            "set -euo pipefail; "
+            f"source {str(SCRIPT_PATH)!r} >/dev/null 2>&1 || true; "
+            "DRY_RUN=1; BRIDGE_MODE=0; "
+            "configure_ufw_and_kernel"
+        ),
+    ]
+    # Source only function definitions by running with --help or extracting functions:
+    # Easier: source with a guard or test via env PATH without ufw/iptables
+    script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+    # Strip trailing `main "$@"` so we can source functions cleanly
+    sourced = tmp_path / "script_funcs.sh"
+    sourced.write_text(script_text.replace('main "$@"', ""), encoding="utf-8")
+
+    res = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"set -euo pipefail; source {str(sourced)!r}; DRY_RUN=1; BRIDGE_MODE=0; configure_ufw_and_kernel",
+        ],
+        env={"PATH": str(empty_bin)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode != 0
+    assert "missing required firewall/TCPMSS prerequisite(s): ufw iptables" in (res.stdout + res.stderr)
+
+
+def test_run_python_cli_prefers_docker_exec_over_compose_build(tmp_path: Path):
+    """Routine CLI subcommands must use docker exec on running marzneshin-xray instead of compose --build."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+
+    # Stub python3 that fails `import nacl, cryptography` so run_python_cli falls through to docker
+    (bin_dir / "python3").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    (bin_dir / "python3").chmod(0o755)
+
+    (bin_dir / "docker").write_text(
+        f"""#!/bin/sh
+echo "$@" >> {str(docker_log)!r}
+if [ "$1" = "ps" ]; then
+    echo "marzneshin-xray"
+    exit 0
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    (bin_dir / "docker").chmod(0o755)
+
+    for tool in ("grep",):
+        real = shutil.which(tool)
+        if real:
+            (bin_dir / tool).symlink_to(real)
+
+    sourced = tmp_path / "script_funcs.sh"
+    sourced.write_text(
+        SCRIPT_PATH.read_text(encoding="utf-8").replace('main "$@"', ""),
+        encoding="utf-8",
+    )
+
+    res = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                f"set -euo pipefail; source {str(sourced)!r}; "
+                f"COMPOSE_PROJECT_DIR={str(tmp_path)!r}; "
+                f"DATA_DIR={str(tmp_path / 'data')!r}; "
+                f"CREDENTIALS_DIR={str(tmp_path / 'creds')!r}; "
+                "run_python_cli status"
+            ),
+        ],
+        env={"PATH": f"{bin_dir}:/bin:/usr/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0, res.stderr
+    logged = docker_log.read_text(encoding="utf-8")
+    assert "exec -i marzneshin-xray python3 -m app.cli" in logged
+    assert "compose" not in logged
+
 

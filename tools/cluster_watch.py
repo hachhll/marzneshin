@@ -22,8 +22,9 @@ import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "marzneshin-watch"
 DEFAULT_SNAPSHOT_PATH = DEFAULT_CACHE_DIR / "snapshot.json"
@@ -31,6 +32,8 @@ DEFAULT_LOCK_PATH = DEFAULT_CACHE_DIR / "watch.lock"
 DEFAULT_SSH_CONNECT_TIMEOUT = 8
 DEFAULT_HOST_CMD_TIMEOUT = 15
 DEFAULT_BRIDGE_STATE_PATH = Path("/var/lib/marzneshin/state.json")
+DEFAULT_TOOLS_ENV_PATH = Path(__file__).resolve().parent / ".env"
+DEFAULT_WATCH_NODES = ["mos:bridge", "server-de:exit"]
 
 PASSIVE_NODE_CMD = r"""
 set -u
@@ -514,7 +517,8 @@ def format_report(
     quarantine_notes: list[str] | None = None,
 ) -> str:
     lines: list[str] = []
-    lines.append("=== MARZNESHIN PASSIVE CLUSTER STATUS ===")
+    ts_str = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    lines.append(f"=== MARZNESHIN PASSIVE CLUSTER STATUS ({ts_str}) ===")
     lines.append(
         f"{'NODE':<14} {'ROLE':<7} {'STATUS':<12} {'SYN_RETR':<10} {'TIMEOUTS':<10} {'RSTS':<8} {'ESTAB':<6} {'RAM_AVAIL':<10} {'XRAY/NGINX'}"
     )
@@ -743,15 +747,56 @@ def run_watch(
         lock_fh.close()
 
 
-def main(argv: list[str] | None = None) -> int:
+def load_tools_env(env_file: Path | None = DEFAULT_TOOLS_ENV_PATH) -> dict[str, str]:
+    """Parse a workstation tools/.env file using stdlib only."""
+    if env_file is None or not env_file.exists() or not env_file.is_file():
+        return {}
+    mode = env_file.stat().st_mode & 0o777
+    if mode & 0o077:
+        print(
+            f"WARNING: {env_file} is readable by group/others (mode {oct(mode)}); run chmod 600 {env_file}",
+            file=sys.stderr,
+        )
+    result: dict[str, str] = {}
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export ") or line.startswith("export\t"):
+            line = line[6:].lstrip()
+        if "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        val = val.strip()
+        if not key:
+            continue
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+            val = val[1:-1]
+        else:
+            val = re.sub(r"\s+#.*$", "", val).strip()
+        result[key] = val
+    return result
+
+
+def _split_env_list(raw: str) -> list[str]:
+    return [item for item in re.split(r"[\s,]+", raw.strip()) if item]
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    env_file: Path | None = DEFAULT_TOOLS_ENV_PATH,
+    environ: Mapping[str, str] | None = None,
+) -> int:
     parser = argparse.ArgumentParser(
         description="Passive, zero-emission SSH cluster watchdog (Phase 1: manual read-only by default)."
     )
     parser.add_argument(
         "--nodes",
         nargs="+",
-        default=["mos:bridge", "server-de:exit"],
-        help="SSH aliases with optional :bridge or :exit role (default: mos:bridge server-de:exit)",
+        default=None,
+        help="SSH aliases with optional :bridge or :exit role (overrides MARZNESHIN_WATCH_NODES / tools/.env; default: mos:bridge server-de:exit)",
     )
     parser.add_argument(
         "--snapshot",
@@ -773,7 +818,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--alert-cmd",
         default=None,
-        help="Phase 2 opt-in executable receiving anonymized alert on stdin (silent on OK; forbidden on mos)",
+        help="Phase 2 opt-in executable receiving anonymized alert on stdin (overrides MARZNESHIN_ALERT_CMD / tools/.env; silent on OK; forbidden on mos)",
     )
     parser.add_argument(
         "--auto-quarantine",
@@ -783,8 +828,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--protect-user",
         action="append",
-        default=[],
-        help="Additional user name to permanently whitelist from auto-quarantine (ai-owner is always protected)",
+        default=None,
+        help="Additional user name to permanently whitelist from auto-quarantine (overrides MARZNESHIN_PROTECT_USERS / tools/.env; ai-owner is always protected)",
     )
     parser.add_argument(
         "--print-systemd-example",
@@ -797,14 +842,44 @@ def main(argv: list[str] | None = None) -> int:
         print(SYSTEMD_TIMER_EXAMPLE)
         return 0
 
+    env_map = os.environ if environ is None else environ
+    file_env = load_tools_env(env_file)
+
+    if args.nodes is not None:
+        nodes = args.nodes
+    elif env_map.get("MARZNESHIN_WATCH_NODES", "").strip():
+        nodes = _split_env_list(env_map["MARZNESHIN_WATCH_NODES"])
+    elif file_env.get("MARZNESHIN_WATCH_NODES", "").strip():
+        nodes = _split_env_list(file_env["MARZNESHIN_WATCH_NODES"])
+    else:
+        nodes = list(DEFAULT_WATCH_NODES)
+
+    if args.protect_user is not None:
+        protected_users = set(args.protect_user)
+    elif env_map.get("MARZNESHIN_PROTECT_USERS", "").strip():
+        protected_users = set(_split_env_list(env_map["MARZNESHIN_PROTECT_USERS"]))
+    elif file_env.get("MARZNESHIN_PROTECT_USERS", "").strip():
+        protected_users = set(_split_env_list(file_env["MARZNESHIN_PROTECT_USERS"]))
+    else:
+        protected_users = set()
+
+    if args.alert_cmd is not None:
+        alert_cmd = args.alert_cmd
+    elif env_map.get("MARZNESHIN_ALERT_CMD", "").strip():
+        alert_cmd = env_map["MARZNESHIN_ALERT_CMD"].strip()
+    elif file_env.get("MARZNESHIN_ALERT_CMD", "").strip():
+        alert_cmd = file_env["MARZNESHIN_ALERT_CMD"].strip()
+    else:
+        alert_cmd = None
+
     code, report = run_watch(
-        args.nodes,
+        nodes,
         snapshot_path=args.snapshot,
         lock_path=args.lock_file,
         reset_stats=bool(args.reset_stats),
         auto_quarantine=bool(args.auto_quarantine),
-        protected_users=set(args.protect_user or []),
-        alert_cmd=args.alert_cmd,
+        protected_users=protected_users,
+        alert_cmd=alert_cmd,
     )
     print(report)
     return code

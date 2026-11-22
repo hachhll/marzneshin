@@ -440,7 +440,17 @@ def test_media_consumer_mobile_only_profiles_and_no_raw_links(tmp_path: Path):
         # Only 5 target media services (no AI/IDE domains leaked into media-consumer profile)
         for ai_dom in ("openai.com", "claude.ai", "anthropic.com", "antigravity.google"):
             assert ai_dom not in serialized
-        for media_dom in ("youtube.com", "instagram.com", "telegram.org", "tiktok.com", "whatsapp.com"):
+        for media_dom in (
+            "youtube.com",
+            "instagram.com",
+            "telegram.org",
+            "tiktok.com",
+            "tiktokv.eu",
+            "bytedance.com",
+            "bytegecko.com",
+            "whatsapp.com",
+            "yazio.com",
+        ):
             assert media_dom in serialized
         # Unconditional blocking of QUIC, STUN, BitTorrent, ::/0, telemetry
         rules = cfg["route"]["rules"]
@@ -452,6 +462,7 @@ def test_media_consumer_mobile_only_profiles_and_no_raw_links(tmp_path: Path):
     # Android-specific fields present on Android, strictly omitted on iOS
     assert and_cfg["route"].get("override_android_vpn") is True
     assert and_cfg["inbounds"][0]["interface_name"] == "sbtun0"
+    assert "com.yazio.android" in MEDIA_SELECTIVE_ANDROID_PACKAGES
     assert any(r.get("package_name") == MEDIA_SELECTIVE_ANDROID_PACKAGES for r in and_cfg["route"]["rules"])
 
     ios_serialized = json.dumps(ios_cfg)

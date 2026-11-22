@@ -419,3 +419,118 @@ def test_quarantine_circuit_breaker_branches():
     target3, notes3 = evaluate_quarantine_candidates(crit_nodes, bm_two, th)
     assert target3 is None
     assert any("aborted by circuit breaker" in n for n in notes3)
+
+
+def test_load_tools_env_parsing_and_permission_warning(tmp_path: Path, capsys) -> None:
+    import tools.cluster_watch as cluster_watch
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "# Leading comment",
+                "   ",
+                'export MARZNESHIN_WATCH_NODES="bridge-1:bridge exit-1:exit exit-2:exit"',
+                "MARZNESHIN_PROTECT_USERS='owner, backup-admin'",
+                "MARZNESHIN_ALERT_CMD=/usr/local/bin/alert-hook # inline comment",
+                "INVALID_LINE_WITHOUT_EQUALS",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env_file.chmod(0o644)
+
+    parsed = cluster_watch.load_tools_env(env_file)
+    captured = capsys.readouterr()
+    assert "chmod 600" in captured.err
+    assert parsed == {
+        "MARZNESHIN_WATCH_NODES": "bridge-1:bridge exit-1:exit exit-2:exit",
+        "MARZNESHIN_PROTECT_USERS": "owner, backup-admin",
+        "MARZNESHIN_ALERT_CMD": "/usr/local/bin/alert-hook",
+    }
+
+    env_file.chmod(0o600)
+    parsed_quiet = cluster_watch.load_tools_env(env_file)
+    assert capsys.readouterr().err == ""
+    assert parsed_quiet == parsed
+    assert cluster_watch.load_tools_env(tmp_path / "missing.env") == {}
+    assert cluster_watch.load_tools_env(None) == {}
+
+
+def test_main_env_precedence_and_isolation(tmp_path: Path, monkeypatch) -> None:
+    import tools.cluster_watch as cluster_watch
+
+    calls: list[dict] = []
+
+    def fake_run_watch(nodes, **kwargs):
+        calls.append({"nodes": list(nodes), **kwargs})
+        return 0, "OK"
+
+    monkeypatch.setattr(cluster_watch, "run_watch", fake_run_watch)
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                'MARZNESHIN_WATCH_NODES="bridge-1:bridge exit-1:exit exit-2:exit"',
+                'MARZNESHIN_PROTECT_USERS="owner admin-2"',
+                'MARZNESHIN_ALERT_CMD="/from-file"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env_file.chmod(0o600)
+
+    # 1. File values used when CLI and environ omit them
+    assert cluster_watch.main([], env_file=env_file, environ={}) == 0
+    assert calls[-1]["nodes"] == ["bridge-1:bridge", "exit-1:exit", "exit-2:exit"]
+    assert calls[-1]["protected_users"] == {"owner", "admin-2"}
+    assert calls[-1]["alert_cmd"] == "/from-file"
+
+    # 2. Process environ overrides tools/.env
+    assert (
+        cluster_watch.main(
+            [],
+            env_file=env_file,
+            environ={
+                "MARZNESHIN_WATCH_NODES": "env-bridge:bridge,env-exit:exit",
+                "MARZNESHIN_PROTECT_USERS": "env-user",
+                "MARZNESHIN_ALERT_CMD": "/from-env",
+            },
+        )
+        == 0
+    )
+    assert calls[-1]["nodes"] == ["env-bridge:bridge", "env-exit:exit"]
+    assert calls[-1]["protected_users"] == {"env-user"}
+    assert calls[-1]["alert_cmd"] == "/from-env"
+
+    # 3. CLI flags override both environ and tools/.env
+    assert (
+        cluster_watch.main(
+            [
+                "--nodes",
+                "cli-bridge:bridge",
+                "cli-exit:exit",
+                "--protect-user",
+                "cli-user",
+                "--alert-cmd",
+                "/from-cli",
+            ],
+            env_file=env_file,
+            environ={
+                "MARZNESHIN_WATCH_NODES": "env-bridge:bridge",
+                "MARZNESHIN_PROTECT_USERS": "env-user",
+                "MARZNESHIN_ALERT_CMD": "/from-env",
+            },
+        )
+        == 0
+    )
+    assert calls[-1]["nodes"] == ["cli-bridge:bridge", "cli-exit:exit"]
+    assert calls[-1]["protected_users"] == {"cli-user"}
+    assert calls[-1]["alert_cmd"] == "/from-cli"
+
+    # 4. Missing env_file falls back to built-in defaults
+    assert cluster_watch.main([], env_file=tmp_path / "nonexistent.env", environ={}) == 0
+    assert calls[-1]["nodes"] == ["mos:bridge", "server-de:exit"]
+    assert calls[-1]["protected_users"] == set()
+    assert calls[-1]["alert_cmd"] is None

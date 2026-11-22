@@ -251,11 +251,21 @@ MEDIA_SELECTIVE_DOMAIN_SUFFIXES = [
     # TikTok
     "tiktok.com",
     "tiktokv.com",
+    "tiktokv.eu",
+    "tiktokv.us",
     "tiktokcdn.com",
     "tiktokcdn-eu.com",
     "tiktokcdn-us.com",
     "byteoversea.com",
+    "bytegecko.com",
+    "bytedance.com",
+    "byteimg.com",
     "ibytedtos.com",
+    "snssdk.com",
+    "isnssdk.com",
+    "sgsnssdk.com",
+    "amemv.com",
+    "pstatp.com",
     "muscdn.com",
     "musical.ly",
     "ttwstatic.com",
@@ -263,6 +273,8 @@ MEDIA_SELECTIVE_DOMAIN_SUFFIXES = [
     "whatsapp.com",
     "whatsapp.net",
     "wa.me",
+    # Yazio
+    "yazio.com",
 ]
 
 MEDIA_SELECTIVE_ANDROID_PACKAGES = [
@@ -276,6 +288,7 @@ MEDIA_SELECTIVE_ANDROID_PACKAGES = [
     "com.ss.android.ugc.trill",
     "com.whatsapp",
     "com.whatsapp.w4b",
+    "com.yazio.android",
 ]
 
 

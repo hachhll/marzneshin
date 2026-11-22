@@ -206,4 +206,7 @@ note.md
 *vpn-credentials/
 .env.*
 !.env.example
+tools/.env
+tools/.env.*
+!tools/.env.example
 .local-inventory.md
