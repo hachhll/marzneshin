@@ -1,9 +1,14 @@
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from app.client import (
+    CLIENT_PROFILE_VERSION,
+    MEDIA_SELECTIVE_ANDROID_PACKAGES,
+    MEDIA_SELECTIVE_DOMAIN_SUFFIXES,
     PODKOP_COMMUNITY_RULESET_NAMES,
     PODKOP_DNS_DOMAIN_RULESET_NAMES,
     SELECTIVE_ANDROID_DIRECT_PACKAGES,
@@ -11,7 +16,10 @@ from app.client import (
     SELECTIVE_DIRECT_BYPASS_DOMAINS,
     SELECTIVE_VPN_DOMAIN_SUFFIXES,
     SELECTIVE_WINDOWS_PROCESSES,
+    SINGBOX_TARGET_MIN_VERSION,
     TELEGRAM_DC_CIDRS,
+    build_media_selective_profile,
+    build_openwrt_outbound_profile,
     build_singbox_profile,
     build_singbox_selective_profile,
     build_vless_vision_uri,
@@ -20,6 +28,7 @@ from app.client import (
     format_terminal_credentials,
     render_qr_utf8,
     write_client_bundle,
+    write_user_bundle,
 )
 from app.xray.config_builder import generate_reality_keypair, generate_short_id
 
@@ -367,3 +376,201 @@ def test_selective_whitelist_singbox_profiles_for_windows_and_android(tmp_path: 
     )
     assert custom_sel["dns"]["rules"][1]["package_name"] == ["com.example.work"]
     assert custom_sel["route"]["final"] == "direct"
+
+
+def test_media_consumer_mobile_only_profiles_and_no_raw_links(tmp_path: Path):
+    _, pub = generate_reality_keypair()
+    sid = generate_short_id()
+    uid = "33333333-3333-4333-8333-333333333333"
+
+    # Media-consumer profiles reject desktop/router platforms
+    for bad_plat in ("windows11-throne", "linux", "openwrt"):
+        with pytest.raises(ValueError, match="mobile-only"):
+            build_media_selective_profile(
+                domain="mos.bridge.net",
+                user_uuid=uid,
+                reality_public_key=pub,
+                reality_short_id=sid,
+                platform=bad_plat,
+                server_host="192.0.2.10",
+            )
+
+    res = write_user_bundle(
+        tmp_path,
+        username="alice-phone",
+        profile="media-selective",
+        domain="mos.bridge.net",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        server_host="192.0.2.10",
+    )
+    user_dir = res["bundle_dir"]
+    assert user_dir == tmp_path / "users" / "alice-phone"
+    created_names = sorted(p.name for p in user_dir.iterdir())
+    assert created_names == [
+        "android-media-selective.json",
+        "bundle-manifest.json",
+        "ios-media-selective.json",
+    ]
+    assert not (user_dir / "links.txt").exists()
+    assert res["profile_version"] == CLIENT_PROFILE_VERSION
+    assert res["singbox_min_version"] == SINGBOX_TARGET_MIN_VERSION
+    assert len(res["profile_sha256"]) == 64
+
+    and_cfg = json.loads((user_dir / "android-media-selective.json").read_text())
+    ios_cfg = json.loads((user_dir / "ios-media-selective.json").read_text())
+
+    for cfg in (and_cfg, ios_cfg):
+        assert cfg["route"]["final"] == "direct"
+        assert cfg["dns"]["final"] == "dns-local"
+        assert {"query_type": "HTTPS", "action": "reject"} in cfg["dns"]["rules"]
+        assert "urltest" not in [o["type"] for o in cfg["outbounds"]]
+        vless_out = next(o for o in cfg["outbounds"] if o["type"] == "vless")
+        assert vless_out["server"] == "192.0.2.10"
+        assert vless_out["tls"]["server_name"] == "mos.bridge.net"
+        assert vless_out["tls"]["utls"]["fingerprint"] == "firefox"
+        assert cfg["http_clients"] == [{"tag": "proxy-http", "detour": "proxy"}]
+        assert cfg["route"]["default_http_client"] == "proxy-http"
+        assert cfg["experimental"]["cache_file"].get("store_dns") is True
+        serialized = json.dumps(cfg)
+        assert "download_detour" not in serialized
+        assert "store_rdrc" not in serialized
+        assert "stack" not in json.dumps(cfg["inbounds"])
+        # Only 5 target media services (no AI/IDE domains leaked into media-consumer profile)
+        for ai_dom in ("openai.com", "claude.ai", "anthropic.com", "antigravity.google"):
+            assert ai_dom not in serialized
+        for media_dom in ("youtube.com", "instagram.com", "telegram.org", "tiktok.com", "whatsapp.com"):
+            assert media_dom in serialized
+        # Unconditional blocking of QUIC, STUN, BitTorrent, ::/0, telemetry
+        rules = cfg["route"]["rules"]
+        assert {"protocol": ["quic", "stun", "bittorrent"], "action": "reject"} in rules
+        assert {"network": "udp", "port": [443, 3478, 19302], "action": "reject"} in rules
+        assert {"ip_cidr": ["::/0"], "action": "reject"} in rules
+        assert any("location.googleapis.com" in r.get("domain", []) and r.get("action") == "reject" for r in rules)
+
+    # Android-specific fields present on Android, strictly omitted on iOS
+    assert and_cfg["route"].get("override_android_vpn") is True
+    assert and_cfg["inbounds"][0]["interface_name"] == "sbtun0"
+    assert any(r.get("package_name") == MEDIA_SELECTIVE_ANDROID_PACKAGES for r in and_cfg["route"]["rules"])
+
+    ios_serialized = json.dumps(ios_cfg)
+    assert "package_name" not in ios_serialized
+    assert "process_name" not in ios_serialized
+    assert "override_android_vpn" not in ios_serialized
+    assert "interface_name" not in ios_serialized
+    assert "rule_set" not in ios_cfg["route"]
+    assert "russia_inside" not in ios_serialized
+    assert set(MEDIA_SELECTIVE_DOMAIN_SUFFIXES).issubset(
+        set(next(r["domain_suffix"] for r in ios_cfg["route"]["rules"] if r.get("outbound") == "proxy" and "domain_suffix" in r))
+    )
+
+
+def test_ai_owner_five_os_admin_suite_and_https_dns_block(tmp_path: Path):
+    _, pub = generate_reality_keypair()
+    sid = generate_short_id()
+    uid = "44444444-4444-4444-8444-444444444444"
+
+    res = write_user_bundle(
+        tmp_path,
+        username="owner",
+        profile="ai-owner",
+        domain="mos.bridge.net",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        server_host="192.0.2.10",
+    )
+    user_dir = res["bundle_dir"]
+    expected_files = {
+        "throne-windows11.json",
+        "throne-windows11-selective.json",
+        "android-singbox.json",
+        "android-singbox-selective.json",
+        "ios-singbox.json",
+        "ios-singbox-selective.json",
+        "linux-singbox.json",
+        "linux-singbox-selective.json",
+        "openwrt-singbox.json",
+        "openwrt-outbound.json",
+        "xray-client.json",
+        "links.txt",
+        "bundle-manifest.json",
+    }
+    assert expected_files.issubset({p.name for p in user_dir.iterdir()})
+    manifest = json.loads((user_dir / "bundle-manifest.json").read_text())
+    assert manifest["profile_role"] == "ai-owner"
+    assert manifest["bundle_sha256"] == res["profile_sha256"]
+    assert "throne-windows11.json" in manifest["files"]
+    assert f"vless://{uid}@192.0.2.10:443?" in (user_dir / "links.txt").read_text()
+
+    # Full-tunnel profiles on all OSes MUST reject query_type HTTPS in dns.rules
+    for full_name in (
+        "throne-windows11.json",
+        "android-singbox.json",
+        "ios-singbox.json",
+        "linux-singbox.json",
+    ):
+        full_cfg = json.loads((user_dir / full_name).read_text())
+        assert {"query_type": "HTTPS", "action": "reject"} in full_cfg["dns"]["rules"], full_name
+        assert "urltest" not in [o["type"] for o in full_cfg["outbounds"]]
+
+    # iOS profiles omit package_name, process_name, override_android_vpn, interface_name, heavy .srs
+    for ios_name in ("ios-singbox.json", "ios-singbox-selective.json"):
+        ios_raw = (user_dir / ios_name).read_text()
+        assert "package_name" not in ios_raw
+        assert "process_name" not in ios_raw
+        assert "override_android_vpn" not in ios_raw
+        assert "interface_name" not in ios_raw
+        assert "russia_inside" not in ios_raw
+
+    # Linux profiles omit override_android_vpn and expose tun + mixed-in
+    lin_cfg = json.loads((user_dir / "linux-singbox-selective.json").read_text())
+    assert "override_android_vpn" not in lin_cfg["route"]
+    assert {i["type"] for i in lin_cfg["inbounds"]} == {"tun", "mixed"}
+
+    # OpenWrt router-safe tproxy + standalone podkop outbound
+    owrt_sb = json.loads((user_dir / "openwrt-singbox.json").read_text())
+    assert owrt_sb["inbounds"] == [
+        {"type": "tproxy", "tag": "tproxy-in", "listen": "0.0.0.0", "listen_port": 7895}
+    ]
+    assert owrt_sb["route"]["final"] == "direct"
+    assert {"query_type": "HTTPS", "action": "reject"} in owrt_sb["dns"]["rules"]
+    assert "auto_route" not in json.dumps(owrt_sb)
+    assert "rule_set" not in owrt_sb["route"]
+
+    owrt_ob = build_openwrt_outbound_profile(
+        domain="mos.bridge.net",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        server_host="192.0.2.10",
+    )
+    assert owrt_ob == json.loads((user_dir / "openwrt-outbound.json").read_text())
+    ob0 = owrt_ob["outbounds"][0]
+    assert ob0["type"] == "vless"
+    assert ob0["server"] == "192.0.2.10"
+    assert ob0["tls"]["utls"]["fingerprint"] == "firefox"
+    assert ob0["packet_encoding"] == "xudp"
+
+    # OpenWrt Full Tunnel is explicitly rejected to protect exit-ai from LAN leaks
+    with pytest.raises(ValueError, match="OpenWrt"):
+        build_singbox_profile(
+            domain="mos.bridge.net",
+            user_uuid=uid,
+            reality_public_key=pub,
+            reality_short_id=sid,
+            platform="openwrt",
+            routing_mode="full",
+            server_host="192.0.2.10",
+        )
+
+    if shutil.which("sing-box"):
+        for check_file in ("throne-windows11.json", "openwrt-singbox.json"):
+            proc = subprocess.run(
+                ["sing-box", "check", "-c", str(user_dir / check_file)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert proc.returncode == 0, f"{check_file}: {proc.stderr}"

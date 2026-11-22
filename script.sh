@@ -32,8 +32,11 @@ Usage:
             [--upstream-xhttp-path <64-hex>] [--bridge-sni <sni>] [--bridge-ip <ip>] [--bridge-acme] [--email <email>] [--dry-run]
   script.sh status
   script.sh xhttp <on|off>
-  script.sh bridge-transport <vision|xhttp> [--path <64-hex>] [--upstream-ip <ip>] [--upstream-domain <fqdn>] \
+  script.sh bridge-transport <vision|xhttp> [--upstream <name>] [--path <64-hex>] [--upstream-ip <ip>] [--upstream-domain <fqdn>] \
             [--upstream-uuid <uuid>] [--upstream-pbk <pubkey>] [--upstream-sid <shortid>]
+  script.sh upstream <add|list|remove|migrate> ...
+  script.sh user <add|list|show|assign|remove|disable|enable> ...
+  script.sh stats [--reset]
   script.sh rotate
   script.sh decoy <corporate|blog|coming_soon|https://...>
   script.sh self-test [--active-probe]
@@ -163,11 +166,34 @@ handle_subcommand() {
             run_python_cli stats "$@"
             exit $?
             ;;
+        upstream)
+            shift
+            if [ "$#" -lt 1 ]; then
+                log_err "Usage: script.sh upstream <add|list|remove|migrate> ..."
+                exit 1
+            fi
+            local up_action="${1:-}"
+            if [ "$up_action" = "list" ]; then
+                run_python_cli upstream "$@"
+                exit $?
+            fi
+            if [ -f "${DATA_DIR}/xray/config.json" ]; then
+                cp "${DATA_DIR}/xray/config.json" "${DATA_DIR}/xray/config.json.bak" 2>/dev/null || true
+            fi
+            run_python_cli upstream "$@"
+            reload_services_if_running
+            exit $?
+            ;;
         user)
             shift
-            if [ "$#" -lt 2 ]; then
-                log_err "Usage: script.sh user <disable|enable> <name> [--automated]"
+            if [ "$#" -lt 1 ]; then
+                log_err "Usage: script.sh user <add|list|show|assign|remove|disable|enable> ..."
                 exit 1
+            fi
+            local user_action="${1:-}"
+            if [ "$user_action" = "list" ] || [ "$user_action" = "show" ]; then
+                run_python_cli user "$@"
+                exit $?
             fi
             if [ -f "${DATA_DIR}/xray/config.json" ]; then
                 cp "${DATA_DIR}/xray/config.json" "${DATA_DIR}/xray/config.json.bak" 2>/dev/null || true

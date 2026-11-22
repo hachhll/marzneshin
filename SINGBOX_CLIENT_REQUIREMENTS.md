@@ -1,4 +1,4 @@
-# Требования к клиентским настройкам `sing-box` (Android SFA и Windows 11 Throne)
+# Требования к клиентским настройкам `sing-box` (5 ОС для `ai-owner` и Mobile-Only для `media-consumer`)
 
 Этот документ фиксирует обязательные технические и анти-цензурные требования к JSON-профилям `sing-box`, генерируемым модулем [`app/client/profile_generator.py`](app/client/profile_generator.py).
 
@@ -6,10 +6,16 @@
 
 ## 1. Поддерживаемые клиенты и версии ядра
 
-| Платформа | Клиент | Целевая версия ядра | Файлы в `/root/vpn-credentials/` |
+| Платформа / Роль | Клиент | Целевая версия ядра | Файлы в `/root/vpn-credentials/users/<user>/` |
 | :--- | :--- | :--- | :--- |
-| **Android** | Официальный **`sing-box`** (`io.nekohasekai.sfa`) | `1.14+` / `1.15+` | `android-singbox.json` (Full)<br>`android-singbox-selective.json` (Selective) |
-| **Windows 11** | **`Throne`** (`throneproj/Throne`) | `1.13+` | `throne-windows11.json` (Full)<br>`throne-windows11-selective.json` (Selective) |
+| **Android (`ai-owner`)** | Официальный **`sing-box`** (`io.nekohasekai.sfa`) | `1.14+` / `1.15+` | `android-singbox.json` (Full)<br>`android-singbox-selective.json` (AI-Selective) |
+| **iOS (`ai-owner`)** | Официальный **`sing-box MT`** (Metamerism LLC, Local import) | `1.14+` | `ios-singbox.json` (Full)<br>`ios-singbox-selective.json` (AI-Selective) |
+| **Windows 11 (`ai-owner`)** | **`Throne`** (`throneproj/Throne`) | `1.13+` | `throne-windows11.json` (Full)<br>`throne-windows11-selective.json` (AI-Selective) |
+| **Linux (`ai-owner`)** | Ванильный **`sing-box`** + **`xray`** | `1.14+` | `linux-singbox.json` (Full)<br>`linux-singbox-selective.json` (AI-Selective)<br>`xray-client.json` |
+| **OpenWrt (`ai-owner`)** | **`podkop`** или сервис **`sing-box`** (`tproxy`) | `1.13+` / `1.14+` | `openwrt-outbound.json` (`podkop`)<br>`openwrt-singbox.json` (router-safe `tproxy` Selective) |
+| **Android / iOS (`media-consumer`)** | Ванильный **`sing-box`** (SFA) / **`sing-box MT`** (SFI) | `1.14+` | `android-media-selective.json`<br>`ios-media-selective.json` (только YouTube, Instagram, Telegram, TikTok, WhatsApp; без `links.txt`) |
+
+> Для `ai-owner` админский бандл (включая `links.txt` и `bundle-manifest.json`) также поддерживается в `/root/vpn-credentials/` и `/root/vpn-credentials/users/<owner>/`. Для `media-consumer` файлы `links.txt` и сырые `vless://` URI **не генерируются**.
 
 ---
 
@@ -108,7 +114,7 @@
 
 ## 5. Особенности и требования для iOS (`sing-box MT` / SFI) и OpenWrt (`podkop` + `sing-box`)
 
-*(Платформенные профили iOS и OpenWrt запланированы в [`openspec/changes/multi-exit-bridge-cluster/`](./openspec/changes/multi-exit-bridge-cluster/proposal.md); ниже зафиксированы обязательные требования к клиентскому ПО, формату JSON и настройке ОС.)*
+*(Платформенные профили iOS и OpenWrt генерируются в [`app/client/profile_generator.py`](app/client/profile_generator.py) в рамках `multi-exit-bridge-cluster`; ниже зафиксированы обязательные требования к клиентскому ПО, формату JSON и настройке ОС.)*
 
 ### 5.1. iOS (`sing-box MT` / SFI `>= 1.14`)
 

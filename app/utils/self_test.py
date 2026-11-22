@@ -14,6 +14,10 @@ from typing import Any, Iterable, Optional
 import httpx
 from cryptography import x509
 
+from app.bridge_state import (
+    migrate_bridge_state_v1_to_v2,
+    validate_bridge_isolation,
+)
 from app.config.env import (
     NGINX_HTTPS_FALLBACK_PORT,
     NGINX_RUNTIME_DIR,
@@ -24,6 +28,9 @@ from app.xray.config_builder import (
     TELEMETRY_BLACKHOLE_DOMAINS,
     validate_xray_config,
 )
+
+DEFAULT_MEMINFO_PATH = "/proc/meminfo"
+BRIDGE_MIN_RECOMMENDED_RAM_MB = 1800
 
 FORBIDDEN_PROCESS_TOKENS = (
     "wg-quick",
@@ -57,13 +64,43 @@ class SelfTestReport:
         }
 
 
+def read_meminfo_mb(
+    meminfo_path: str | Path = DEFAULT_MEMINFO_PATH,
+) -> tuple[int, int] | None:
+    """Passively read MemTotal and SwapTotal in MiB from /proc/meminfo."""
+    mp = Path(meminfo_path)
+    if not mp.exists():
+        return None
+    try:
+        mem_kb: int | None = None
+        swap_kb: int | None = None
+        for line in mp.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("MemTotal:"):
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    mem_kb = int(parts[1])
+            elif line.startswith("SwapTotal:"):
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    swap_kb = int(parts[1])
+        if mem_kb is None:
+            return None
+        return mem_kb // 1024, (swap_kb or 0) // 1024
+    except OSError:
+        return None
+
+
 def detect_mode_from_config(config_path: str = XRAY_CONFIG_PATH) -> str:
     p = Path(config_path)
     if p.exists():
         try:
             cfg = json.loads(p.read_text(encoding="utf-8"))
             tags = {o.get("tag") for o in cfg.get("outbounds", [])}
-            if "proxy" in tags and "direct" not in tags:
+            has_proxy = any(
+                isinstance(t, str) and (t == "proxy" or t.startswith("proxy-"))
+                for t in tags
+            )
+            if has_proxy and "direct" not in tags:
                 return "bridge"
         except Exception:
             pass
@@ -78,10 +115,48 @@ def detect_mode_from_config(config_path: str = XRAY_CONFIG_PATH) -> str:
     return "exit"
 
 
+def _check_bridge_state_and_capacity(
+    *,
+    cfg: dict[str, Any],
+    cfg_path: Path,
+    primary_inbound: dict[str, Any],
+    state_path: str | Path | None,
+    meminfo_path: str | Path | None,
+) -> list[str]:
+    """Validate optional sibling bridge state.json and emit capacity headroom warnings."""
+    warnings: list[str] = []
+    client_count = len(primary_inbound.get("settings", {}).get("clients", []))
+    resolved_state_path = (
+        Path(state_path)
+        if state_path is not None
+        else cfg_path.resolve().parent.parent / "state.json"
+    )
+    if resolved_state_path.exists():
+        raw_state = json.loads(resolved_state_path.read_text(encoding="utf-8"))
+        if raw_state.get("mode") == "bridge":
+            norm_state, _ = migrate_bridge_state_v1_to_v2(raw_state)
+            warnings.extend(validate_bridge_isolation(norm_state))
+            client_count = max(client_count, len(norm_state.get("users", {})))
+
+    if client_count > 1:
+        mem_info = read_meminfo_mb(meminfo_path or DEFAULT_MEMINFO_PATH)
+        if mem_info is not None:
+            mem_mb, swap_mb = mem_info
+            if mem_mb < BRIDGE_MIN_RECOMMENDED_RAM_MB or swap_mb == 0:
+                warnings.append(
+                    f"multi-user bridge memory headroom below baseline "
+                    f"(RAM={mem_mb} MB, Swap={swap_mb} MB; target >= 2 GB RAM + 1 GB swap)"
+                )
+    return warnings
+
+
 def check_xray_config_safety(
     config_path: str = XRAY_CONFIG_PATH,
     expected_ipv6: bool = False,
     mode: Optional[str] = None,
+    *,
+    state_path: str | Path | None = None,
+    meminfo_path: str | Path | None = None,
 ) -> SelfTestCheck:
     p = Path(config_path)
     if not p.exists():
@@ -112,12 +187,23 @@ def check_xray_config_safety(
                 {},
             )
             inb_snis = primary.get("streamSettings", {}).get("realitySettings", {}).get("serverNames", [])
-            proxy_ob = next((o for o in cfg.get("outbounds", []) if o.get("tag") == "proxy"), {})
-            up_sni = proxy_ob.get("streamSettings", {}).get("realitySettings", {}).get("serverName", "")
-            if inb_snis and up_sni and inb_snis[0].lower() == up_sni.lower():
-                warnings.append(
-                    f"shared bridge/upstream SNI '{up_sni}' (RCA Risk #1/#4: set separate --bridge-sni)"
-                )
+            proxy_obs = [
+                o
+                for o in cfg.get("outbounds", [])
+                if isinstance(o.get("tag"), str)
+                and (o["tag"] == "proxy" or o["tag"].startswith("proxy-"))
+            ]
+            transports: list[str] = []
+            for proxy_ob in proxy_obs:
+                up_sni = proxy_ob.get("streamSettings", {}).get("realitySettings", {}).get("serverName", "")
+                if inb_snis and up_sni and inb_snis[0].lower() == up_sni.lower():
+                    warnings.append(
+                        f"shared bridge/upstream SNI '{up_sni}' (RCA Risk #1/#4: set separate --bridge-sni)"
+                    )
+                up_net = proxy_ob.get("streamSettings", {}).get("network", "tcp")
+                if up_net not in transports:
+                    transports.append(up_net)
+
             cert_file = p.resolve().parent.parent / "certs" / "fullchain.pem"
             if cert_file.exists():
                 try:
@@ -128,13 +214,27 @@ def check_xray_config_safety(
                         )
                 except Exception:
                     pass
-            up_net = proxy_ob.get("streamSettings", {}).get("network", "tcp")
+
+            warnings.extend(
+                _check_bridge_state_and_capacity(
+                    cfg=cfg,
+                    cfg_path=p,
+                    primary_inbound=primary,
+                    state_path=state_path,
+                    meminfo_path=meminfo_path,
+                )
+            )
+            up_net_summary = ",".join(transports) or "tcp"
+            upstreams_note = (
+                f", upstreams={len(proxy_obs)}" if len(proxy_obs) > 1 else ""
+            )
             has_loopback_stats = "StatsService" in cfg.get("api", {}).get("services", [])
             stats_note = (
                 ", stats=in-memory(127.0.0.1)" if has_loopback_stats else ""
             )
             detail = (
-                f"mode=bridge, upstream={up_net}, log=none{stats_note}, dest=127.0.0.1:8443 (Zero-Loop), "
+                f"mode=bridge, upstream={up_net_summary}{upstreams_note}, log=none{stats_note}, "
+                "dest=127.0.0.1:8443 (Zero-Loop), "
                 "fail-closed vless Reality proxy outbound (no direct freedom), "
                 "QUIC/STUN/::/0/telemetry blackholes active"
             )
@@ -143,7 +243,7 @@ def check_xray_config_safety(
         else:
             detail = (
                 "log=none, sockopt tcpKeepAliveIdle=120, routeOnly=True, "
-                "QUIC/STUN/::/0/telemetry blackholes active, gvt1/gvt2 allowed"
+                "RU egress blackhole active, QUIC/STUN/::/0/telemetry blackholes active, gvt1/gvt2 allowed"
             )
         return SelfTestCheck(
             name="xray_config_safety",
@@ -376,6 +476,12 @@ def check_client_templates_safety() -> SelfTestCheck:
                 passed=False,
                 detail=f"Telemetry blackhole domain '{dom}' missing from client templates",
             )
+    if {"query_type": "HTTPS", "action": "reject"} not in sb.get("dns", {}).get("rules", []):
+        return SelfTestCheck(
+            name="client_template_anti_drift",
+            passed=False,
+            detail="sing-box template missing DNS query_type=HTTPS reject rule",
+        )
     return SelfTestCheck(
         name="client_template_anti_drift",
         passed=True,
@@ -683,6 +789,8 @@ async def run_self_test(
     nginx_fallback_port: int = NGINX_HTTPS_FALLBACK_PORT,
     include_network_probes: bool = False,
     mode: Optional[str] = None,
+    state_path: str | Path | None = None,
+    meminfo_path: str | Path | None = None,
 ) -> SelfTestReport:
     resolved_mode = mode or detect_mode_from_config(xray_config_path)
     checks: list[SelfTestCheck] = [
@@ -690,6 +798,8 @@ async def run_self_test(
             xray_config_path,
             expected_ipv6=ipv6_egress_enabled,
             mode=resolved_mode,
+            state_path=state_path,
+            meminfo_path=meminfo_path,
         ),
         check_nginx_logging_and_tls_conf(nginx_runtime_dir),
         scan_forbidden_processes(),

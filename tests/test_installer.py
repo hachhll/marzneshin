@@ -356,7 +356,7 @@ def test_bridge_mode_zero_emission_installer_and_cli(tmp_path: Path):
     xray_cfg = json.loads((data_dir / "xray" / "config.json").read_text())
     validate_xray_config(xray_cfg, mode="bridge")
     out_tags = {o["tag"] for o in xray_cfg["outbounds"]}
-    assert out_tags == {"proxy", "block"}
+    assert out_tags == {"proxy-default", "block"}
     assert "direct" not in out_tags
 
     st = _run_installer(bin_dir, ["status"], extra_env=extra)

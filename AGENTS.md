@@ -116,3 +116,13 @@ Before any code deployment, run local tests:
 - Current client spec: [SINGBOX_CLIENT_REQUIREMENTS.md](./SINGBOX_CLIENT_REQUIREMENTS.md)
 - Mandatory next OpenSpec change: [openspec/changes/multi-exit-bridge-cluster/](./openspec/changes/multi-exit-bridge-cluster/)
 - Historical RCA & DPI research (archived): [docs/archive/](./docs/archive/) (`RCA_SERVER_FAM_2026-11-15.md`, `RISK_TRACKING_AND_MITIGATION.md`, `DEPLOYMENT_SAFETY_PROTOCOL.md`, `HANDOVER_CONTEXT_2026-11-15.md`, `HANDOVER_CONTEXT_2026-11-16.md`, `DRIFT-TO-XHTTP.md`, `DPI_RESEARCH_HABR_1109052_2026-11-21.md`)
+
+---
+
+## 7. Response & Step-by-Step Execution Protocol
+
+- **Short by default:** Answer questions concisely; provide detailed explanations only when explicitly requested.
+- **Step-by-step interactive execution:** When user actions/steps are required:
+  1. First provide a short numbered overview of the upcoming steps (1 sentence per step).
+  2. Describe **only the current step** in detail and wait for the user to execute it.
+  3. Answer questions/troubleshoot that step; move on to detailing the next step **only** after the user confirms the current step is completed.

@@ -26,6 +26,19 @@ TELEMETRY_BLACKHOLE_DOMAINS = [
     "domain:firebase-settings.crashlytics.com",
 ]
 
+RU_EGRESS_BLACKHOLE_DOMAINS = [
+    "domain:ru",
+    "domain:su",
+    "domain:xn--p1ai",
+]
+
+RU_EGRESS_BLACKHOLE_GEOIPS = [
+    "geoip:ru",
+]
+
+BRIDGE_XMUX_MAX_REUSABLE_SECS = "180-300"
+BRIDGE_XMUX_MAX_REUSABLE_CEIL_SECS = 600
+
 FORBIDDEN_BLACKHOLE_DOMAINS = {"gvt1.com", "domain:gvt1.com", "gvt2.com", "domain:gvt2.com"}
 
 PRIVATE_IP_BLACKHOLE_CIDRS = [
@@ -331,6 +344,16 @@ class LocalXrayConfigBuilder:
                     },
                     {
                         "type": "field",
+                        "domain": list(RU_EGRESS_BLACKHOLE_DOMAINS),
+                        "outboundTag": "block",
+                    },
+                    {
+                        "type": "field",
+                        "ip": list(RU_EGRESS_BLACKHOLE_GEOIPS),
+                        "outboundTag": "block",
+                    },
+                    {
+                        "type": "field",
                         "inboundTag": active_vless_tags,
                         "outboundTag": "direct",
                     },
@@ -341,35 +364,22 @@ class LocalXrayConfigBuilder:
         validate_xray_config(config, expected_ipv6=ipv6_egress_enabled, mode="exit")
         return config
 
-    @classmethod
-    def build_bridge(
-        cls,
+    @staticmethod
+    def _build_bridge_outbound(
         *,
-        bridge_sni: str,
-        reality_private_key: str,
-        reality_short_ids: list[str],
+        tag: str,
         upstream_ip: str,
         upstream_domain: str,
         upstream_uuid: str,
         upstream_public_key: str,
         upstream_short_id: str,
-        clients: list[dict[str, Any]] | None = None,
         upstream_port: int = 443,
         upstream_fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
         upstream_transport: str | None = None,
         upstream_xhttp_path: str = "",
         upstream_xhttp_mode: str = "stream-up",
         mux_enabled: bool = False,
-        listen_port: int = XRAY_LISTEN_PORT,
-        fallback_port: int = NGINX_HTTPS_FALLBACK_PORT,
-        api_address: str = XRAY_API_ADDRESS,
     ) -> dict[str, Any]:
-        """Build a fail-closed, zero-loop Russian cascade bridge config (Moscow -> Frankfurt)."""
-        if not bridge_sni or "." not in bridge_sni:
-            raise ValueError("bridge_sni must be a valid FQDN")
-        if not reality_private_key:
-            raise ValueError("reality_private_key is required")
-        valid_short_ids = validate_short_ids(reality_short_ids)
         clean_upstream_fp = validate_utls_fingerprint(upstream_fingerprint)
         default_transport = (
             "xhttp" if (upstream_xhttp_path or "").strip() else "vision"
@@ -391,7 +401,7 @@ class LocalXrayConfigBuilder:
             clean_xhttp_path = "/" + raw_path
 
         try:
-            addr_obj = ipaddress.ip_address(upstream_ip.strip())
+            addr_obj = ipaddress.ip_address((upstream_ip or "").strip())
             if addr_obj.version != 4:
                 raise ValueError("upstream_ip must be an IPv4 address")
         except ValueError as exc:
@@ -406,22 +416,6 @@ class LocalXrayConfigBuilder:
         if not upstream_public_key:
             raise ValueError("upstream_public_key is required")
         validate_short_ids([upstream_short_id])
-
-        api_host, api_port_str = api_address.rsplit(":", 1)
-        api_port = int(api_port_str)
-
-        vision_clients = [
-            {
-                "id": c["id"],
-                "flow": "xtls-rprx-vision",
-                "email": c.get("email", "owner"),
-            }
-            for c in (clients or [])
-        ]
-
-        ip_blackholes = list(PRIVATE_IP_BLACKHOLE_CIDRS)
-        if "::/0" not in ip_blackholes:
-            ip_blackholes.append("::/0")
 
         use_xhttp = clean_transport == "xhttp"
         upstream_user: dict[str, Any] = {
@@ -465,10 +459,169 @@ class LocalXrayConfigBuilder:
                     "maxConnections": 0,
                     "cMaxReuseTimes": 0,
                     "hMaxRequestTimes": "600-900",
-                    "hMaxReusableSecs": "1800-3000",
+                    "hMaxReusableSecs": BRIDGE_XMUX_MAX_REUSABLE_SECS,
                     "hKeepAlivePeriod": 0,
                 },
             }
+
+        return {
+            "tag": tag,
+            "protocol": "vless",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": upstream_ip.strip(),
+                        "port": upstream_port,
+                        "users": [upstream_user],
+                    }
+                ]
+            },
+            "streamSettings": upstream_stream_settings,
+            "mux": mux_cfg,
+        }
+
+    @classmethod
+    def build_bridge(
+        cls,
+        *,
+        bridge_sni: str,
+        reality_private_key: str,
+        reality_short_ids: list[str],
+        upstream_ip: str | None = None,
+        upstream_domain: str | None = None,
+        upstream_uuid: str | None = None,
+        upstream_public_key: str | None = None,
+        upstream_short_id: str | None = None,
+        upstreams: dict[str, dict[str, Any]] | None = None,
+        user_routes: dict[str, str] | None = None,
+        clients: list[dict[str, Any]] | None = None,
+        upstream_port: int = 443,
+        upstream_fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
+        upstream_transport: str | None = None,
+        upstream_xhttp_path: str = "",
+        upstream_xhttp_mode: str = "stream-up",
+        mux_enabled: bool = False,
+        listen_port: int = XRAY_LISTEN_PORT,
+        fallback_port: int = NGINX_HTTPS_FALLBACK_PORT,
+        api_address: str = XRAY_API_ADDRESS,
+    ) -> dict[str, Any]:
+        """Build a fail-closed, zero-loop Russian cascade bridge config (single or multi-upstream)."""
+        if not bridge_sni or "." not in bridge_sni:
+            raise ValueError("bridge_sni must be a valid FQDN")
+        if not reality_private_key:
+            raise ValueError("reality_private_key is required")
+        valid_short_ids = validate_short_ids(reality_short_ids)
+
+        api_host, api_port_str = api_address.rsplit(":", 1)
+        api_port = int(api_port_str)
+
+        vision_clients = [
+            {
+                "id": c["id"],
+                "flow": "xtls-rprx-vision",
+                "email": c.get("email", "owner"),
+            }
+            for c in (clients or [])
+        ]
+
+        ip_blackholes = list(PRIVATE_IP_BLACKHOLE_CIDRS)
+        if "::/0" not in ip_blackholes:
+            ip_blackholes.append("::/0")
+
+        outbounds: list[dict[str, Any]] = []
+        tail_rules: list[dict[str, Any]] = []
+
+        if upstreams is not None:
+            if not isinstance(upstreams, dict) or not upstreams:
+                raise ValueError("upstreams must be a non-empty mapping")
+            routes_map = dict(user_routes or {})
+            grouped_users: dict[str, list[str]] = {name: [] for name in upstreams}
+
+            for up_name, up_cfg in upstreams.items():
+                if not up_name or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", up_name):
+                    raise ValueError(f"Invalid upstream name '{up_name}'")
+                outbounds.append(
+                    cls._build_bridge_outbound(
+                        tag=f"proxy-{up_name}",
+                        upstream_ip=str(up_cfg.get("ip", "")),
+                        upstream_domain=str(up_cfg.get("domain", "")),
+                        upstream_uuid=str(up_cfg.get("uuid", "")),
+                        upstream_public_key=str(up_cfg.get("public_key", "")),
+                        upstream_short_id=str(up_cfg.get("short_id", "")),
+                        upstream_port=int(up_cfg.get("port", 443) or 443),
+                        upstream_fingerprint=str(
+                            up_cfg.get("fingerprint") or DEFAULT_UTLS_FINGERPRINT
+                        ),
+                        upstream_transport=up_cfg.get("transport"),
+                        upstream_xhttp_path=str(up_cfg.get("xhttp_path", "")),
+                        upstream_xhttp_mode=str(
+                            up_cfg.get("xhttp_mode") or "stream-up"
+                        ),
+                        mux_enabled=bool(up_cfg.get("mux_enabled", False)),
+                    )
+                )
+
+            for c in clients or []:
+                email = str(c.get("email", "")).strip()
+                target_up = routes_map.get(email) or c.get("upstream")
+                if not target_up:
+                    continue
+                if target_up not in grouped_users:
+                    raise ValueError(
+                        f"Client '{email}' references unknown upstream '{target_up}'"
+                    )
+                if email and email not in grouped_users[target_up]:
+                    grouped_users[target_up].append(email)
+
+            for up_name, bound_emails in grouped_users.items():
+                if bound_emails:
+                    tail_rules.append(
+                        {
+                            "type": "field",
+                            "inboundTag": [PRIMARY_INBOUND_TAG],
+                            "user": bound_emails,
+                            "outboundTag": f"proxy-{up_name}",
+                        }
+                    )
+            tail_rules.append(
+                {
+                    "type": "field",
+                    "inboundTag": [PRIMARY_INBOUND_TAG],
+                    "outboundTag": "block",
+                }
+            )
+        else:
+            outbounds.append(
+                cls._build_bridge_outbound(
+                    tag="proxy",
+                    upstream_ip=upstream_ip or "",
+                    upstream_domain=upstream_domain or "",
+                    upstream_uuid=upstream_uuid or "",
+                    upstream_public_key=upstream_public_key or "",
+                    upstream_short_id=upstream_short_id or "",
+                    upstream_port=upstream_port,
+                    upstream_fingerprint=upstream_fingerprint,
+                    upstream_transport=upstream_transport,
+                    upstream_xhttp_path=upstream_xhttp_path,
+                    upstream_xhttp_mode=upstream_xhttp_mode,
+                    mux_enabled=mux_enabled,
+                )
+            )
+            tail_rules.append(
+                {
+                    "type": "field",
+                    "inboundTag": [PRIMARY_INBOUND_TAG],
+                    "outboundTag": "proxy",
+                }
+            )
+
+        outbounds.append(
+            {
+                "tag": "block",
+                "protocol": "blackhole",
+                "settings": {"response": {"type": "none"}},
+            }
+        )
 
         config: dict[str, Any] = {
             "log": {
@@ -532,28 +685,7 @@ class LocalXrayConfigBuilder:
                     },
                 },
             ],
-            "outbounds": [
-                {
-                    "tag": "proxy",
-                    "protocol": "vless",
-                    "settings": {
-                        "vnext": [
-                            {
-                                "address": upstream_ip.strip(),
-                                "port": upstream_port,
-                                "users": [upstream_user],
-                            }
-                        ]
-                    },
-                    "streamSettings": upstream_stream_settings,
-                    "mux": mux_cfg,
-                },
-                {
-                    "tag": "block",
-                    "protocol": "blackhole",
-                    "settings": {"response": {"type": "none"}},
-                },
-            ],
+            "outbounds": outbounds,
             "routing": {
                 "domainStrategy": "AsIs",
                 "rules": [
@@ -583,17 +715,155 @@ class LocalXrayConfigBuilder:
                         "ip": ip_blackholes,
                         "outboundTag": "block",
                     },
-                    {
-                        "type": "field",
-                        "inboundTag": [PRIMARY_INBOUND_TAG],
-                        "outboundTag": "proxy",
-                    },
+                    *tail_rules,
                 ],
             },
         }
 
         validate_xray_config(config, expected_ipv6=False, mode="bridge")
         return config
+
+
+def _validate_bounded_xmux_reusable_secs(raw_val: Any, label: str) -> None:
+    """Require xmux.hMaxReusableSecs to rotate in bounded minute-scale intervals (1..600s)."""
+    if raw_val is None or raw_val == "":
+        raise ValueError(f"{label} missing xmux.hMaxReusableSecs rotation bound")
+    text = str(raw_val).strip()
+    m = re.fullmatch(r"(\d+)(?:-(\d+))?", text)
+    if not m:
+        raise ValueError(
+            f"{label} invalid xmux.hMaxReusableSecs '{raw_val}': expected N or MIN-MAX seconds"
+        )
+    low = int(m.group(1))
+    high = int(m.group(2) or m.group(1))
+    if low < 1 or high < low or high > BRIDGE_XMUX_MAX_REUSABLE_CEIL_SECS:
+        raise ValueError(
+            f"{label} xmux.hMaxReusableSecs '{raw_val}' must be bounded within 1-{BRIDGE_XMUX_MAX_REUSABLE_CEIL_SECS}s"
+        )
+
+
+def _validate_bridge_outbound(proxy_ob: dict[str, Any]) -> None:
+    tag = str(proxy_ob.get("tag", "<unknown>"))
+    if proxy_ob.get("protocol") != "vless":
+        raise ValueError(f"Bridge '{tag}' outbound must use 'vless' protocol")
+    vnext = proxy_ob.get("settings", {}).get("vnext", [])
+    if len(vnext) != 1:
+        raise ValueError(f"Bridge '{tag}' outbound must target a single upstream")
+    up_addr = vnext[0].get("address", "")
+    try:
+        if ipaddress.ip_address(up_addr).version != 4:
+            raise ValueError("Upstream address must be IPv4")
+    except ValueError as exc:
+        raise ValueError(
+            "Bridge upstream address must be a numeric IPv4 address (zero DNS leakage)"
+        ) from exc
+    up_stream = proxy_ob.get("streamSettings", {})
+    up_net = up_stream.get("network")
+    if up_net not in {"tcp", "xhttp"}:
+        raise ValueError("Bridge upstream network must be 'tcp' or 'xhttp'")
+    if up_stream.get("security") != "reality":
+        raise ValueError("Bridge upstream must use Reality security")
+    if up_net == "xhttp":
+        up_users = vnext[0].get("users", [{}])
+        if up_users and up_users[0].get("flow"):
+            raise ValueError(
+                "Bridge XHTTP upstream must have empty flow (flow='')"
+            )
+        if proxy_ob.get("mux", {}).get("enabled") is True:
+            raise ValueError("Bridge XHTTP upstream must have mux.enabled=False")
+        xhttp_cfg = up_stream.get("xhttpSettings", {})
+        xpath = str(xhttp_cfg.get("path", ""))
+        if not xpath.startswith("/") or len(xpath) < 2:
+            raise ValueError(
+                "Bridge XHTTP upstream requires non-root xhttpSettings.path"
+            )
+        if not xhttp_cfg.get("xPaddingBytes") or not isinstance(
+            xhttp_cfg.get("xmux"), dict
+        ):
+            raise ValueError(
+                "Bridge XHTTP upstream requires xPaddingBytes and xmux configuration"
+            )
+        _validate_bounded_xmux_reusable_secs(
+            xhttp_cfg["xmux"].get("hMaxReusableSecs"),
+            f"Bridge '{tag}'",
+        )
+    up_reality = up_stream.get("realitySettings", {})
+    if up_reality.get("fingerprint") not in ALLOWED_REALITY_FINGERPRINTS:
+        raise ValueError(
+            "Bridge upstream Reality must use a supported non-empty uTLS fingerprint"
+        )
+    if not up_reality.get("serverName") or not up_reality.get("publicKey"):
+        raise ValueError("Bridge upstream Reality requires serverName and publicKey")
+    validate_short_ids([up_reality.get("shortId", "")])
+    _validate_required_sockopt(up_stream.get("sockopt", {}), f"Bridge upstream '{tag}'")
+
+
+def _validate_bridge_routing(
+    rules: list[dict[str, Any]],
+    proxy_tags: set[str],
+    is_multi_upstream: bool,
+) -> None:
+    if not is_multi_upstream:
+        return
+    seen_users: dict[str, str] = {}
+    last_proxy_idx = -1
+    catchall_block_idx = -1
+    for idx, r in enumerate(rules):
+        target = r.get("outboundTag")
+        if target in proxy_tags:
+            last_proxy_idx = idx
+            users = r.get("user")
+            if not isinstance(users, list) or not users:
+                raise ValueError(
+                    f"Multi-upstream bridge rule for '{target}' must statically bind explicit 'user' list"
+                )
+            for uname in users:
+                if uname in seen_users:
+                    raise ValueError(
+                        f"Bridge user '{uname}' cannot route to multiple upstreams ('{seen_users[uname]}' and '{target}')"
+                    )
+                seen_users[uname] = str(target)
+        elif (
+            target == "block"
+            and PRIMARY_INBOUND_TAG in (r.get("inboundTag") or [])
+            and not r.get("user")
+            and not r.get("domain")
+            and not r.get("ip")
+            and not r.get("network")
+            and not r.get("protocol")
+        ):
+            catchall_block_idx = idx
+    if catchall_block_idx == -1 or catchall_block_idx < last_proxy_idx:
+        raise ValueError(
+            "Multi-upstream bridge routing must end with a fail-closed catch-all block rule"
+        )
+
+
+def _validate_exit_ru_blackholes(rules: list[dict[str, Any]]) -> None:
+    direct_indices = [
+        idx for idx, r in enumerate(rules) if r.get("outboundTag") == "direct"
+    ]
+    cutoff = min(direct_indices) if direct_indices else len(rules)
+    blocked_domains: set[str] = set()
+    blocked_ips: set[str] = set()
+    for r in rules[:cutoff]:
+        if r.get("outboundTag") == "block":
+            blocked_domains.update(r.get("domain", []))
+            blocked_ips.update(r.get("ip", []))
+    missing_domains = [
+        d for d in RU_EGRESS_BLACKHOLE_DOMAINS if d not in blocked_domains
+    ]
+    if missing_domains:
+        raise ValueError(
+            f"Mandatory exit RU domain blackhole missing prior to direct: {missing_domains}"
+        )
+    missing_ips = [
+        ip_rule for ip_rule in RU_EGRESS_BLACKHOLE_GEOIPS if ip_rule not in blocked_ips
+    ]
+    if missing_ips:
+        raise ValueError(
+            f"Mandatory exit RU IP blackhole missing prior to direct: {missing_ips}"
+        )
 
 
 def validate_xray_config(
@@ -615,8 +885,14 @@ def validate_xray_config(
 
     outbounds = config.get("outbounds", [])
     outbound_tags = {o.get("tag") for o in outbounds}
+    has_bridge_proxy = any(
+        isinstance(t, str) and (t == "proxy" or t.startswith("proxy-"))
+        for t in outbound_tags
+    )
     detected_mode = mode or (
-        "bridge" if "proxy" in outbound_tags else "exit"
+        "bridge"
+        if (has_bridge_proxy and "direct" not in outbound_tags)
+        else "exit"
     )
 
     api_services = config.get("api", {}).get("services", [])
@@ -666,60 +942,33 @@ def validate_xray_config(
     ):
         raise ValueError(f"DNS queryStrategy must be {expected_strategy}")
 
+    proxy_tags: set[str] = set()
+    is_multi_upstream = False
     if detected_mode == "bridge":
-        if outbound_tags != {"proxy", "block"}:
-            raise ValueError(
-                "Bridge outbounds must contain only 'proxy' and 'block' (fail-closed: no 'direct' allowed)"
-            )
-        proxy_ob = next(o for o in outbounds if o.get("tag") == "proxy")
-        if proxy_ob.get("protocol") != "vless":
-            raise ValueError("Bridge 'proxy' outbound must use 'vless' protocol")
-        vnext = proxy_ob.get("settings", {}).get("vnext", [])
-        if len(vnext) != 1:
-            raise ValueError("Bridge 'proxy' outbound must target a single upstream")
-        up_addr = vnext[0].get("address", "")
-        try:
-            if ipaddress.ip_address(up_addr).version != 4:
-                raise ValueError("Upstream address must be IPv4")
-        except ValueError as exc:
-            raise ValueError(
-                "Bridge upstream address must be a numeric IPv4 address (zero DNS leakage)"
-            ) from exc
-        up_stream = proxy_ob.get("streamSettings", {})
-        up_net = up_stream.get("network")
-        if up_net not in {"tcp", "xhttp"}:
-            raise ValueError(
-                "Bridge upstream network must be 'tcp' or 'xhttp'"
-            )
-        if up_stream.get("security") != "reality":
-            raise ValueError("Bridge upstream must use Reality security")
-        if up_net == "xhttp":
-            up_users = vnext[0].get("users", [{}])
-            if up_users and up_users[0].get("flow"):
+        for ob in outbounds:
+            tag = ob.get("tag")
+            proto = str(ob.get("protocol", "")).lower()
+            if proto == "freedom" or tag == "direct":
                 raise ValueError(
-                    "Bridge XHTTP upstream must have empty flow (flow='')"
+                    "Bridge outbounds must be fail-closed (no 'direct'/'freedom' allowed)"
                 )
-            xhttp_cfg = up_stream.get("xhttpSettings", {})
-            xpath = str(xhttp_cfg.get("path", ""))
-            if not xpath.startswith("/") or len(xpath) < 2:
+            if tag == "block":
+                if proto != "blackhole":
+                    raise ValueError("Bridge 'block' outbound must be blackhole")
+                continue
+            if isinstance(tag, str) and (tag == "proxy" or tag.startswith("proxy-")):
+                if tag.startswith("proxy-"):
+                    is_multi_upstream = True
+                proxy_tags.add(tag)
+                _validate_bridge_outbound(ob)
+            else:
                 raise ValueError(
-                    "Bridge XHTTP upstream requires non-root xhttpSettings.path"
+                    f"Bridge outbounds must contain only 'proxy'/'proxy-*' and 'block' (fail-closed: got '{tag}')"
                 )
-            if not xhttp_cfg.get("xPaddingBytes") or not isinstance(
-                xhttp_cfg.get("xmux"), dict
-            ):
-                raise ValueError(
-                    "Bridge XHTTP upstream requires xPaddingBytes and xmux configuration"
-                )
-        up_reality = up_stream.get("realitySettings", {})
-        if up_reality.get("fingerprint") not in ALLOWED_REALITY_FINGERPRINTS:
+        if "block" not in outbound_tags or not proxy_tags:
             raise ValueError(
-                "Bridge upstream Reality must use a supported non-empty uTLS fingerprint"
+                "Bridge outbounds must contain at least one proxy outbound and 'block'"
             )
-        if not up_reality.get("serverName") or not up_reality.get("publicKey"):
-            raise ValueError("Bridge upstream Reality requires serverName and publicKey")
-        validate_short_ids([up_reality.get("shortId", "")])
-        _validate_required_sockopt(up_stream.get("sockopt", {}), "Bridge upstream")
         if config.get("routing", {}).get("domainStrategy") != "AsIs":
             raise ValueError(
                 "Bridge routing.domainStrategy must be 'AsIs' to prevent local DNS leakage"
@@ -833,3 +1082,8 @@ def validate_xray_config(
         raise ValueError(
             "Mandatory private-IP (and ::/0 when IPv6 disabled) blackhole rule missing"
         )
+
+    if detected_mode == "bridge":
+        _validate_bridge_routing(rules, proxy_tags, is_multi_upstream)
+    else:
+        _validate_exit_ru_blackholes(rules)

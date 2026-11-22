@@ -315,7 +315,7 @@ def test_xray_bridge_config_zero_loop_and_fail_closed():
         "maxConnections": 0,
         "cMaxReuseTimes": 0,
         "hMaxRequestTimes": "600-900",
-        "hMaxReusableSecs": "1800-3000",
+        "hMaxReusableSecs": "180-300",
         "hKeepAlivePeriod": 0,
     }
     assert xhttp_ob["mux"]["enabled"] is False
@@ -338,3 +338,139 @@ def test_xray_bridge_config_zero_loop_and_fail_closed():
     bad_fp["outbounds"][0]["streamSettings"]["realitySettings"]["fingerprint"] = "bogus"
     with pytest.raises(ValueError, match="uTLS fingerprint"):
         validate_xray_config(bad_fp, mode="bridge")
+
+
+def test_exit_ru_egress_blackhole_and_validation():
+    priv, _ = generate_reality_keypair()
+    sid = generate_short_id()
+    cfg = LocalXrayConfigBuilder.build(
+        domain="exit-ai.example.com",
+        reality_private_key=priv,
+        reality_short_ids=[sid],
+        clients=[{"id": "11111111-1111-4111-8111-111111111111", "email": "owner"}],
+    )
+
+    rules = cfg["routing"]["rules"]
+    direct_idx = next(i for i, r in enumerate(rules) if r.get("outboundTag") == "direct")
+    ru_dom_idx = next(
+        i
+        for i, r in enumerate(rules)
+        if r.get("outboundTag") == "block" and "domain:ru" in r.get("domain", [])
+    )
+    ru_ip_idx = next(
+        i
+        for i, r in enumerate(rules)
+        if r.get("outboundTag") == "block" and "geoip:ru" in r.get("ip", [])
+    )
+    assert ru_dom_idx < direct_idx
+    assert ru_ip_idx < direct_idx
+    assert {"domain:ru", "domain:su", "domain:xn--p1ai"}.issubset(
+        set(rules[ru_dom_idx]["domain"])
+    )
+    assert all(o["protocol"] in {"freedom", "blackhole"} for o in cfg["outbounds"])
+
+    no_ru_dom = copy.deepcopy(cfg)
+    no_ru_dom["routing"]["rules"].pop(ru_dom_idx)
+    with pytest.raises(ValueError, match="RU domain blackhole"):
+        validate_xray_config(no_ru_dom, expected_ipv6=False, mode="exit")
+
+    no_ru_ip = copy.deepcopy(cfg)
+    no_ru_ip["routing"]["rules"].pop(ru_ip_idx)
+    with pytest.raises(ValueError, match="RU IP blackhole"):
+        validate_xray_config(no_ru_ip, expected_ipv6=False, mode="exit")
+
+
+def test_multi_upstream_bridge_static_routing_and_xmux_bounds():
+    priv_bridge, _ = generate_reality_keypair()
+    _, pub_ai = generate_reality_keypair()
+    _, pub_media = generate_reality_keypair()
+
+    cfg = LocalXrayConfigBuilder.build_bridge(
+        bridge_sni="mos.bridge-edge.net",
+        reality_private_key=priv_bridge,
+        reality_short_ids=[generate_short_id()],
+        upstreams={
+            "exit-ai": {
+                "ip": "203.0.113.10",
+                "domain": "de-ai.only-ai.org",
+                "uuid": "aaaaaaaa-1111-4111-8111-111111111111",
+                "public_key": pub_ai,
+                "short_id": generate_short_id(),
+                "transport": "xhttp",
+                "xhttp_path": "a" * 64,
+            },
+            "exit-media-1": {
+                "ip": "198.51.100.20",
+                "domain": "de-media.stream-cdn.net",
+                "uuid": "bbbbbbbb-2222-4222-8222-222222222222",
+                "public_key": pub_media,
+                "short_id": generate_short_id(),
+                "transport": "xhttp",
+                "xhttp_path": "b" * 64,
+            },
+        },
+        clients=[
+            {"id": "11111111-1111-4111-8111-111111111111", "email": "owner"},
+            {"id": "22222222-2222-4222-8222-222222222222", "email": "alice"},
+        ],
+        user_routes={
+            "owner": "exit-ai",
+            "alice": "exit-media-1",
+        },
+    )
+
+    validate_xray_config(cfg, expected_ipv6=False)
+    assert cfg["routing"]["domainStrategy"] == "AsIs"
+    out_tags = [o["tag"] for o in cfg["outbounds"]]
+    assert out_tags == ["proxy-exit-ai", "proxy-exit-media-1", "block"]
+    assert all(o["protocol"] != "freedom" for o in cfg["outbounds"])
+
+    for ob in cfg["outbounds"][:2]:
+        assert ob["streamSettings"]["network"] == "xhttp"
+        assert ob["streamSettings"]["realitySettings"]["fingerprint"] == "firefox"
+        assert ob["streamSettings"]["sockopt"]["tcpMptcp"] is False
+        assert ob["mux"]["enabled"] is False
+        assert ob["streamSettings"]["xhttpSettings"]["xmux"]["hMaxReusableSecs"] == "180-300"
+
+    primary_clients = cfg["inbounds"][1]["settings"]["clients"]
+    assert [(c["email"], c["flow"]) for c in primary_clients] == [
+        ("owner", "xtls-rprx-vision"),
+        ("alice", "xtls-rprx-vision"),
+    ]
+
+    rules = cfg["routing"]["rules"]
+    assert rules[-3] == {
+        "type": "field",
+        "inboundTag": [PRIMARY_INBOUND_TAG],
+        "user": ["owner"],
+        "outboundTag": "proxy-exit-ai",
+    }
+    assert rules[-2] == {
+        "type": "field",
+        "inboundTag": [PRIMARY_INBOUND_TAG],
+        "user": ["alice"],
+        "outboundTag": "proxy-exit-media-1",
+    }
+    assert rules[-1] == {
+        "type": "field",
+        "inboundTag": [PRIMARY_INBOUND_TAG],
+        "outboundTag": "block",
+    }
+
+    # Rejects unbounded/excessive xmux rotation (>600s)
+    bad_xmux = copy.deepcopy(cfg)
+    bad_xmux["outbounds"][0]["streamSettings"]["xhttpSettings"]["xmux"]["hMaxReusableSecs"] = "1800-3000"
+    with pytest.raises(ValueError, match="hMaxReusableSecs"):
+        validate_xray_config(bad_xmux, mode="bridge")
+
+    # Rejects missing fail-closed catch-all block rule
+    bad_tail = copy.deepcopy(cfg)
+    bad_tail["routing"]["rules"].pop()
+    with pytest.raises(ValueError, match="catch-all block"):
+        validate_xray_config(bad_tail, mode="bridge")
+
+    # Rejects user routed to multiple upstreams
+    bad_dup = copy.deepcopy(cfg)
+    bad_dup["routing"]["rules"][-2]["user"].append("owner")
+    with pytest.raises(ValueError, match="multiple upstreams"):
+        validate_xray_config(bad_dup, mode="bridge")

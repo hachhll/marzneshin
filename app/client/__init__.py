@@ -1,4 +1,7 @@
 from .profile_generator import (
+    CLIENT_PROFILE_VERSION,
+    MEDIA_SELECTIVE_ANDROID_PACKAGES,
+    MEDIA_SELECTIVE_DOMAIN_SUFFIXES,
     PODKOP_COMMUNITY_RULESET_NAMES,
     PODKOP_DNS_DOMAIN_RULESET_NAMES,
     SELECTIVE_ANDROID_DIRECT_PACKAGES,
@@ -6,9 +9,13 @@ from .profile_generator import (
     SELECTIVE_DIRECT_BYPASS_DOMAINS,
     SELECTIVE_VPN_DOMAIN_SUFFIXES,
     SELECTIVE_WINDOWS_PROCESSES,
+    SINGBOX_TARGET_MIN_VERSION,
     SINGBOX_TELEMETRY_DOMAIN_SUFFIXES,
     SINGBOX_TELEMETRY_EXACT_DOMAINS,
+    SUPPORTED_SINGBOX_PLATFORMS,
     TELEGRAM_DC_CIDRS,
+    build_media_selective_profile,
+    build_openwrt_outbound_profile,
     build_singbox_profile,
     build_singbox_selective_profile,
     build_vless_vision_uri,
@@ -16,10 +23,14 @@ from .profile_generator import (
     build_xray_client_profile,
     format_terminal_credentials,
     write_client_bundle,
+    write_user_bundle,
 )
 from .qr import encode_qr_matrix, render_qr_utf8
 
 __all__ = [
+    "CLIENT_PROFILE_VERSION",
+    "MEDIA_SELECTIVE_ANDROID_PACKAGES",
+    "MEDIA_SELECTIVE_DOMAIN_SUFFIXES",
     "PODKOP_COMMUNITY_RULESET_NAMES",
     "PODKOP_DNS_DOMAIN_RULESET_NAMES",
     "SELECTIVE_ANDROID_DIRECT_PACKAGES",
@@ -27,9 +38,13 @@ __all__ = [
     "SELECTIVE_DIRECT_BYPASS_DOMAINS",
     "SELECTIVE_VPN_DOMAIN_SUFFIXES",
     "SELECTIVE_WINDOWS_PROCESSES",
+    "SINGBOX_TARGET_MIN_VERSION",
     "SINGBOX_TELEMETRY_DOMAIN_SUFFIXES",
     "SINGBOX_TELEMETRY_EXACT_DOMAINS",
+    "SUPPORTED_SINGBOX_PLATFORMS",
     "TELEGRAM_DC_CIDRS",
+    "build_media_selective_profile",
+    "build_openwrt_outbound_profile",
     "build_singbox_profile",
     "build_singbox_selective_profile",
     "build_vless_vision_uri",
@@ -39,4 +54,5 @@ __all__ = [
     "format_terminal_credentials",
     "render_qr_utf8",
     "write_client_bundle",
+    "write_user_bundle",
 ]

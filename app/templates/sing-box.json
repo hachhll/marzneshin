@@ -19,6 +19,12 @@
         "detour": "proxy"
       }
     ],
+    "rules": [
+      {
+        "query_type": "HTTPS",
+        "action": "reject"
+      }
+    ],
     "final": "dns-remote",
     "strategy": "ipv4_only"
   },
