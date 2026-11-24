@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from app.client import (
+    AI_USER_DOMAIN_SUFFIXES,
+    AI_USER_ROUTE_EXCLUDE_ADDRESSES,
     CLIENT_PROFILE_VERSION,
     MEDIA_SELECTIVE_ANDROID_PACKAGES,
     MEDIA_SELECTIVE_DOMAIN_SUFFIXES,
@@ -18,6 +20,7 @@ from app.client import (
     SELECTIVE_WINDOWS_PROCESSES,
     SINGBOX_TARGET_MIN_VERSION,
     TELEGRAM_DC_CIDRS,
+    build_ai_user_profile,
     build_media_selective_profile,
     build_openwrt_outbound_profile,
     build_singbox_profile,
@@ -585,3 +588,160 @@ def test_ai_owner_five_os_admin_suite_and_https_dns_block(tmp_path: Path):
                 timeout=10,
             )
             assert proc.returncode == 0, f"{check_file}: {proc.stderr}"
+
+
+def test_ai_user_linux_profile_and_bundle_invariants(tmp_path: Path):
+    _, pub = generate_reality_keypair()
+    sid = generate_short_id()
+    uid = "55555555-5555-4555-8555-555555555555"
+
+    res = write_user_bundle(
+        tmp_path,
+        username="worknode",
+        profile="ai-user",
+        domain="mos.bridge.net",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        server_host="192.0.2.10",
+    )
+    user_dir = res["bundle_dir"]
+    assert user_dir == tmp_path / "users" / "worknode"
+    assert sorted(p.name for p in user_dir.iterdir()) == [
+        "bundle-manifest.json",
+        "linux-ai-user.json",
+    ]
+    assert not (user_dir / "links.txt").exists()
+    assert res["profile_version"] == CLIENT_PROFILE_VERSION
+    assert res["singbox_min_version"] == SINGBOX_TARGET_MIN_VERSION
+    assert len(res["profile_sha256"]) == 64
+
+    manifest = json.loads((user_dir / "bundle-manifest.json").read_text())
+    assert manifest["profile_role"] == "ai-user"
+    assert manifest["user"] == "worknode"
+    assert list(manifest["files"].keys()) == ["linux-ai-user.json"]
+
+    cfg = json.loads((user_dir / "linux-ai-user.json").read_text())
+    direct_cfg = build_ai_user_profile(
+        domain="mos.bridge.net",
+        user_uuid=uid,
+        reality_public_key=pub,
+        reality_short_id=sid,
+        server_host="192.0.2.10",
+    )
+    assert cfg == direct_cfg
+
+    # SD-card longevity: warn logging + tmpfs cache_file path + store_dns
+    assert cfg["log"] == {"level": "warn"}
+    assert cfg["experimental"]["cache_file"]["enabled"] is True
+    assert cfg["experimental"]["cache_file"]["store_dns"] is True
+    assert cfg["experimental"]["cache_file"]["path"] == "/run/sing-box/cache.db"
+
+    # Hybrid Selective TUN (excluding LAN + Docker subnets) + mixed-in 127.0.0.1:2080
+    tun_in = next(i for i in cfg["inbounds"] if i["type"] == "tun")
+    mixed_in = next(i for i in cfg["inbounds"] if i["type"] == "mixed")
+    assert tun_in["auto_route"] is True
+    assert tun_in["strict_route"] is True
+    assert tun_in["address"] == ["198.18.0.1/30"]
+    assert tun_in["route_exclude_address"] == [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+    ]
+    assert tun_in["route_exclude_address"] == AI_USER_ROUTE_EXCLUDE_ADDRESSES
+    assert mixed_in == {
+        "type": "mixed",
+        "tag": "mixed-in",
+        "listen": "127.0.0.1",
+        "listen_port": 2080,
+    }
+
+    # Manual selector only (zero urltest), fp=firefox, Reality to bridge
+    assert "urltest" not in [o["type"] for o in cfg["outbounds"]]
+    assert {o["tag"] for o in cfg["outbounds"]} == {"proxy", "vless-vision", "direct"}
+    vless_out = next(o for o in cfg["outbounds"] if o["type"] == "vless")
+    assert vless_out["server"] == "192.0.2.10"
+    assert vless_out["tls"]["server_name"] == "mos.bridge.net"
+    assert vless_out["tls"]["utls"]["fingerprint"] == "firefox"
+
+    # All 7 podkop rule-sets via proxy-http, with domain-only 3 in dns.rules
+    expected_podkop_tags = [f"podkop-{name}" for name in PODKOP_COMMUNITY_RULESET_NAMES]
+    expected_podkop_dns_tags = [f"podkop-{name}" for name in PODKOP_DNS_DOMAIN_RULESET_NAMES]
+    assert cfg["http_clients"] == [{"tag": "proxy-http", "detour": "proxy"}]
+    assert cfg["route"]["default_http_client"] == "proxy-http"
+    assert [rs["tag"] for rs in cfg["route"]["rule_set"]] == expected_podkop_tags
+    for rs in cfg["route"]["rule_set"]:
+        assert rs["http_client"] == "proxy-http"
+        assert "download_detour" not in rs
+
+    # DNS rules: reject HTTPS RR, .ru/.su/.xn--p1ai -> dns-local, podkop DNS + AI_USER_DOMAIN_SUFFIXES -> dns-remote
+    dns_rules = cfg["dns"]["rules"]
+    assert cfg["dns"]["final"] == "dns-local"
+    assert cfg["dns"]["strategy"] == "ipv4_only"
+    assert dns_rules[0] == {"query_type": "HTTPS", "action": "reject"}
+    idx_ru_dns = next(
+        i for i, r in enumerate(dns_rules) if r.get("domain_suffix") == [".ru", ".su", ".xn--p1ai"]
+    )
+    idx_podkop_dns = next(
+        i for i, r in enumerate(dns_rules) if r.get("rule_set") == expected_podkop_dns_tags
+    )
+    idx_ai_dns = next(
+        i for i, r in enumerate(dns_rules) if r.get("domain_suffix") == AI_USER_DOMAIN_SUFFIXES
+    )
+    assert dns_rules[idx_ru_dns]["server"] == "dns-local"
+    assert dns_rules[idx_podkop_dns]["server"] == "dns-remote"
+    assert dns_rules[idx_ai_dns]["server"] == "dns-remote"
+    assert idx_ru_dns < idx_podkop_dns < idx_ai_dns
+
+    # Route rules: private direct, telemetry/::/0/QUIC/STUN/BitTorrent reject, mixed-in -> proxy, .ru -> direct before podkop/AI domains, Telegram CIDRs
+    rules = cfg["route"]["rules"]
+    assert cfg["route"]["final"] == "direct"
+    assert "override_android_vpn" not in cfg["route"]
+    idx_private = next(i for i, r in enumerate(rules) if r.get("ip_is_private") is True)
+    idx_telem = next(i for i, r in enumerate(rules) if "location.googleapis.com" in r.get("domain", []))
+    idx_ipv6 = next(i for i, r in enumerate(rules) if r.get("ip_cidr") == ["::/0"])
+    idx_mixed = next(i for i, r in enumerate(rules) if r.get("inbound") == ["mixed-in"] and r.get("outbound") == "proxy")
+    idx_ru_direct = next(
+        i for i, r in enumerate(rules)
+        if r.get("domain_suffix") == [".ru", ".su", ".xn--p1ai"] and r.get("outbound") == "direct"
+    )
+    idx_podkop = next(i for i, r in enumerate(rules) if r.get("rule_set") == expected_podkop_tags and r.get("outbound") == "proxy")
+    idx_ai_dom = next(i for i, r in enumerate(rules) if r.get("domain_suffix") == AI_USER_DOMAIN_SUFFIXES and r.get("outbound") == "proxy")
+    idx_tg = next(i for i, r in enumerate(rules) if r.get("ip_cidr") == TELEGRAM_DC_CIDRS and r.get("outbound") == "proxy")
+
+    assert rules[idx_private]["outbound"] == "direct"
+    assert rules[idx_telem]["action"] == "reject"
+    assert rules[idx_ipv6]["action"] == "reject"
+    assert {"protocol": ["quic", "stun", "bittorrent"], "action": "reject"} in rules
+    assert {"network": "udp", "port": [443, 3478, 19302], "action": "reject"} in rules
+    assert idx_private < idx_telem < idx_ipv6 < idx_mixed < idx_ru_direct < idx_podkop < idx_ai_dom < idx_tg
+
+    # Required AI/Dev suffixes present (and gvt1/gvt2 allowed)
+    ai_set = set(AI_USER_DOMAIN_SUFFIXES)
+    for required_dom in (
+        "openai.com",
+        "chatgpt.com",
+        "anthropic.com",
+        "claude.ai",
+        "gemini.google",
+        "openrouter.ai",
+        "x.ai",
+        "grok.com",
+        "huggingface.co",
+        "github.com",
+        "databricks.com",
+        "okta.com",
+        "auth0.com",
+        "microsoft.com",
+        "azure.com",
+        "githubcopilot.com",
+        "pypi.org",
+        "npmjs.org",
+        "docker.io",
+        "crates.io",
+        "golang.org",
+        "cursor.com",
+        "gvt1.com",
+        "gvt2.com",
+    ):
+        assert required_dom in ai_set, required_dom

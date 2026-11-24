@@ -384,7 +384,7 @@ def test_cli_user_add_show_assign_remove_and_script_sh(tmp_path: Path, capsys):
     assert (ai_bundle / "openwrt-outbound.json").exists()
     assert (ai_bundle / "links.txt").exists()
 
-    # 2. Negative: adding second user OR media user to exit-ai -> rejected with state unchanged
+    # 2. Negative: adding second ai-owner OR media-selective user to exit-ai -> rejected with state unchanged
     snap_state = state_path.read_text(encoding="utf-8")
     snap_xray = xray_cfg_path.read_text(encoding="utf-8")
     assert (
@@ -407,6 +407,84 @@ def test_cli_user_add_show_assign_remove_and_script_sh(tmp_path: Path, capsys):
     assert xray_cfg_path.read_text(encoding="utf-8") == snap_xray
     assert not (creds_dir / "users" / "bob").exists()
     capsys.readouterr()
+
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "user",
+                "add",
+                "bob-media",
+                "--upstream",
+                "exit-ai",
+                "--profile",
+                "media-selective",
+            ]
+        )
+        == 1
+    )
+    assert state_path.read_text(encoding="utf-8") == snap_state
+    assert xray_cfg_path.read_text(encoding="utf-8") == snap_xray
+    assert not (creds_dir / "users" / "bob-media").exists()
+    capsys.readouterr()
+
+    # 2b. Positive: adding ai-user ('worknode') alongside ai-owner ('admin-ai') on exit-ai succeeds
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "user",
+                "add",
+                "worknode",
+                "--upstream",
+                "exit-ai",
+                "--profile",
+                "ai-user",
+            ]
+        )
+        == 0
+    )
+    worknode_out = json.loads(capsys.readouterr().out)
+    assert worknode_out["user"] == "worknode"
+    assert len(worknode_out["profile_sha256"]) == 64
+    worknode_dir = creds_dir / "users" / "worknode"
+    assert sorted(p.name for p in worknode_dir.iterdir()) == [
+        "bundle-manifest.json",
+        "linux-ai-user.json",
+    ]
+    assert not (worknode_dir / "links.txt").exists()
+    xray_with_worknode = json.loads(xray_cfg_path.read_text(encoding="utf-8"))
+    validate_xray_config(xray_with_worknode, mode="bridge")
+    assert xray_with_worknode["routing"]["domainStrategy"] == "AsIs"
+    assert any(
+        "worknode" in r.get("user", [])
+        and "admin-ai" in r.get("user", [])
+        and r.get("outboundTag") == "proxy-exit-ai"
+        for r in xray_with_worknode["routing"]["rules"]
+    )
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "user",
+                "show",
+                "worknode",
+            ]
+        )
+        == 0
+    )
+    worknode_show = capsys.readouterr().out
+    assert "ai-user" in worknode_show
+    assert "Raw VLESS: omitted" in worknode_show
 
     # 3. user add alice -> default (media-selective, mobile-only, NO links.txt)
     assert (

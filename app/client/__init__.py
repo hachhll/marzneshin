@@ -1,4 +1,6 @@
 from .profile_generator import (
+    AI_USER_DOMAIN_SUFFIXES,
+    AI_USER_ROUTE_EXCLUDE_ADDRESSES,
     CLIENT_PROFILE_VERSION,
     MEDIA_SELECTIVE_ANDROID_PACKAGES,
     MEDIA_SELECTIVE_DOMAIN_SUFFIXES,
@@ -14,6 +16,7 @@ from .profile_generator import (
     SINGBOX_TELEMETRY_EXACT_DOMAINS,
     SUPPORTED_SINGBOX_PLATFORMS,
     TELEGRAM_DC_CIDRS,
+    build_ai_user_profile,
     build_media_selective_profile,
     build_openwrt_outbound_profile,
     build_singbox_profile,
@@ -28,6 +31,8 @@ from .profile_generator import (
 from .qr import encode_qr_matrix, render_qr_utf8
 
 __all__ = [
+    "AI_USER_DOMAIN_SUFFIXES",
+    "AI_USER_ROUTE_EXCLUDE_ADDRESSES",
     "CLIENT_PROFILE_VERSION",
     "MEDIA_SELECTIVE_ANDROID_PACKAGES",
     "MEDIA_SELECTIVE_DOMAIN_SUFFIXES",
@@ -43,6 +48,7 @@ __all__ = [
     "SINGBOX_TELEMETRY_EXACT_DOMAINS",
     "SUPPORTED_SINGBOX_PLATFORMS",
     "TELEGRAM_DC_CIDRS",
+    "build_ai_user_profile",
     "build_media_selective_profile",
     "build_openwrt_outbound_profile",
     "build_singbox_profile",

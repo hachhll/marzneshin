@@ -5,7 +5,9 @@ import pytest
 
 from app.bridge_state import (
     BRIDGE_STATE_SCHEMA_VERSION,
+    USER_PROFILES,
     atomic_write_json,
+    default_platforms_for_profile,
     extract_root_domain,
     ipv4_slash24,
     migrate_bridge_state_v1_to_v2,
@@ -137,20 +139,31 @@ def test_bridge_isolation_guards_reject_violations_cleanly():
     }
     assert validate_bridge_isolation(base) == []
 
-    # 1. >1 user on ai-isolated
+    # 0. ai-owner + ai-user on ai-isolated is allowed; ai-user defaults to linux platform
+    assert "ai-user" in USER_PROFILES
+    assert default_platforms_for_profile("ai-user") == ["linux"]
+    with_ai_user = json.loads(json.dumps(base))
+    with_ai_user["users"]["worknode"] = {
+        "uuid": "44444444-4444-4444-8444-444444444444",
+        "upstream": "exit-ai",
+        "profile": "ai-user",
+    }
+    assert validate_bridge_isolation(with_ai_user) == []
+
+    # 1. >1 ai-owner on ai-isolated is rejected
     too_many = json.loads(json.dumps(base))
     too_many["users"]["second-admin"] = {
         "uuid": "33333333-3333-4333-8333-333333333333",
         "upstream": "exit-ai",
         "profile": "ai-owner",
     }
-    with pytest.raises(ValueError, match="at most 1 user"):
+    with pytest.raises(ValueError, match="at most 1 'ai-owner' user"):
         validate_bridge_isolation(too_many)
 
-    # 2. media-selective bound to ai-isolated
+    # 2. media-selective bound to ai-isolated is rejected
     wrong_profile = json.loads(json.dumps(base))
     wrong_profile["users"]["owner"]["profile"] = "media-selective"
-    with pytest.raises(ValueError, match="only 'ai-owner'"):
+    with pytest.raises(ValueError, match="only 'ai-owner' and 'ai-user'"):
         validate_bridge_isolation(wrong_profile)
 
     # 3. Shared root domain is allowed with a non-fatal operational warning

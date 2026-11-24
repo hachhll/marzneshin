@@ -291,6 +291,180 @@ MEDIA_SELECTIVE_ANDROID_PACKAGES = [
     "com.yazio.android",
 ]
 
+AI_USER_ROUTE_EXCLUDE_ADDRESSES = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+]
+
+AI_USER_DOMAIN_SUFFIXES = [
+    # OpenAI / ChatGPT
+    "openai.com",
+    "chatgpt.com",
+    "oaistatic.com",
+    "oaiusercontent.com",
+    "sora.com",
+    # Anthropic / Claude / Claude Code
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "claude.usercontent.com",
+    "claudeusercontent.com",
+    "claudemcpclient.com",
+    # Google / Gemini / AI Studio / Antigravity / NotebookLM / GCP / YouTube
+    "google.com",
+    "googleapis.com",
+    "googleusercontent.com",
+    "googlevideo.com",
+    "gstatic.com",
+    "gvt1.com",
+    "gvt2.com",
+    "ggpht.com",
+    "ytimg.com",
+    "youtube.com",
+    "youtu.be",
+    "withgoogle.com",
+    "deepmind.google",
+    "antigravity.google",
+    "antigravityide.net",
+    "notebooklm.google",
+    "notebooklm-enterprise.google",
+    "gemini.google",
+    "labs.google",
+    "google.dev",
+    "google.ai",
+    "ai.google",
+    "ai.dev",
+    "g.co",
+    "goo.gl",
+    "firebaseapp.com",
+    "gmail.com",
+    "recaptcha.net",
+    "pkg.dev",
+    "gcr.io",
+    # OpenRouter / Grok / x.ai / HuggingFace / AI Providers
+    "openrouter.ai",
+    "x.ai",
+    "grok.com",
+    "huggingface.co",
+    "hf.co",
+    "perplexity.ai",
+    "mistral.ai",
+    "groq.com",
+    "cohere.com",
+    "together.ai",
+    "fireworks.ai",
+    "replicate.com",
+    # AI IDEs
+    "cursor.com",
+    "cursor.sh",
+    "cursor-cdn.com",
+    "windsurf.com",
+    "codeium.com",
+    "zed.dev",
+    # GitHub
+    "github.com",
+    "githubusercontent.com",
+    "githubassets.com",
+    "github.io",
+    "github.dev",
+    "githubcopilot.com",
+    "ghcr.io",
+    # Databricks / Okta / Auth0
+    "databricks.com",
+    "databricks.com.cn",
+    "databricks.cfg",
+    "databricks-labs.com",
+    "databricks-prod-cloudfront.com",
+    "azuredatabricks.net",
+    "databricksusercontent.com",
+    "evently.com",
+    "databriks.com",
+    "databriks.net",
+    "okta.com",
+    "oktacdn.com",
+    "oktapreview.com",
+    "okta-emea.com",
+    "auth0.com",
+    "auth0.net",
+    # Microsoft / Azure / VS Code / Copilot
+    "microsoft.com",
+    "microsoftonline.com",
+    "msauth.net",
+    "msftauth.net",
+    "msftidentity.com",
+    "live.com",
+    "office.com",
+    "office365.com",
+    "azure.com",
+    "azure.net",
+    "azurewebsites.net",
+    "azureedge.net",
+    "visualstudio.com",
+    "vscode.dev",
+    "vscode-cdn.net",
+    "msecnd.net",
+    "windows.net",
+    # Package / Container Registries & Dev Tooling
+    "pypi.org",
+    "pythonhosted.org",
+    "python.org",
+    "astral.sh",
+    "npmjs.org",
+    "npmjs.com",
+    "nodejs.org",
+    "yarnpkg.com",
+    "pnpm.io",
+    "deno.land",
+    "bun.sh",
+    "docker.io",
+    "docker.com",
+    "quay.io",
+    "k8s.io",
+    "nvcr.io",
+    "crates.io",
+    "rust-lang.org",
+    "rustup.rs",
+    "docs.rs",
+    "golang.org",
+    "go.dev",
+    "stackoverflow.com",
+    "sstatic.net",
+    "jetbrains.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "brew.sh",
+    # Discord / Telegram / X / Meta / LinkedIn (complements podkop non-domain rule-sets for DNS)
+    "discord.com",
+    "discordapp.com",
+    "discordapp.net",
+    "discord.gg",
+    "discord.media",
+    "discordstatus.com",
+    "discordcdn.com",
+    "telegram.org",
+    "t.me",
+    "tdesktop.com",
+    "telesco.pe",
+    "telegra.ph",
+    "tg.dev",
+    "telegram.me",
+    "x.com",
+    "twitter.com",
+    "twimg.com",
+    "t.co",
+    "instagram.com",
+    "cdninstagram.com",
+    "facebook.com",
+    "fbcdn.net",
+    "fbsbx.com",
+    "fb.com",
+    "meta.com",
+    "threads.net",
+    "linkedin.com",
+    "licdn.com",
+]
+
 
 def _ensure_not_ip_host(domain: str) -> str:
     clean = validate_domain(domain)
@@ -866,6 +1040,73 @@ def build_media_selective_profile(
     )
 
 
+def build_ai_user_profile(
+    *,
+    domain: str,
+    user_uuid: str,
+    reality_public_key: str,
+    reality_short_id: str,
+    port: int = 443,
+    server_host: str | None = None,
+    fingerprint: str = DEFAULT_UTLS_FINGERPRINT,
+    route_exclude_address: list[str] | None = None,
+    cache_file_path: str = "/run/sing-box/cache.db",
+) -> dict[str, Any]:
+    """Generate hardened Linux sing-box (>= 1.14) Selective TUN + mixed-in profile for ai-user."""
+    profile = build_singbox_profile(
+        domain=domain,
+        user_uuid=user_uuid,
+        reality_public_key=reality_public_key,
+        reality_short_id=reality_short_id,
+        include_xhttp_backup=False,
+        platform="linux",
+        port=port,
+        ipv6_egress_enabled=False,
+        server_host=server_host,
+        fingerprint=fingerprint,
+        routing_mode="selective",
+        selective_domains=list(AI_USER_DOMAIN_SUFFIXES),
+        selective_apps=[],
+        selective_cidrs=list(TELEGRAM_DC_CIDRS),
+        include_podkop_rulesets=True,
+    )
+    profile["log"] = {"level": "warn"}
+    profile["experimental"]["cache_file"]["path"] = cache_file_path
+
+    excludes = list(
+        AI_USER_ROUTE_EXCLUDE_ADDRESSES
+        if route_exclude_address is None
+        else route_exclude_address
+    )
+    for inb in profile["inbounds"]:
+        if inb.get("type") == "tun":
+            # IPv4-only non-overlapping TUN CIDR avoids IPv6 netlink errors under disable_ipv6=1
+            # and avoids colliding with Docker 172.16.0.0/12 bridges.
+            inb["address"] = ["198.18.0.1/30"]
+            inb["route_exclude_address"] = excludes
+
+    # Explicitly keep domestic .ru/.su/.xn--p1ai traffic direct before proxy rule-sets/domains.
+    route_rules = profile["route"]["rules"]
+    insert_idx = next(
+        (
+            i + 1
+            for i, r in enumerate(route_rules)
+            if r.get("domain") == SELECTIVE_DIRECT_BYPASS_DOMAINS
+            and r.get("outbound") == "direct"
+        ),
+        len(route_rules),
+    )
+    route_rules.insert(
+        insert_idx,
+        {
+            "domain_suffix": [".ru", ".su", ".xn--p1ai"],
+            "action": "route",
+            "outbound": "direct",
+        },
+    )
+    return profile
+
+
 def build_openwrt_outbound_profile(
     *,
     domain: str,
@@ -1101,6 +1342,10 @@ def _compute_bundle_manifest(
         manifest["warning"] = (
             "Admin-only ai-owner bundle: NEVER share links.txt or exit-ai profiles with media users."
         )
+    elif profile_role == "ai-user":
+        manifest["note"] = (
+            "Deploy linux-ai-user.json to /etc/sing-box/config.json (0600) on Linux sing-box >= 1.14."
+        )
     else:
         manifest["note"] = (
             "Import JSON locally via sing-box >= 1.14 (Android SFA or iOS sing-box MT -> Profiles -> + -> Local)."
@@ -1251,9 +1496,9 @@ def write_user_bundle(
 ) -> dict[str, Any]:
     """Write isolated per-user role-scoped client profiles under users/<username>/."""
     clean_profile = (profile or "").strip().lower()
-    if clean_profile not in {"ai-owner", "media-selective"}:
+    if clean_profile not in {"ai-owner", "ai-user", "media-selective"}:
         raise ValueError(
-            f"Unsupported profile '{profile}': expected 'ai-owner' or 'media-selective'"
+            f"Unsupported profile '{profile}': expected 'ai-owner', 'ai-user', or 'media-selective'"
         )
     user_dir = Path(credentials_dir) / "users" / username
     user_dir.mkdir(parents=True, exist_ok=True)
@@ -1283,8 +1528,7 @@ def write_user_bundle(
             "profile_sha256": manifest["bundle_sha256"],
         }
 
-    # Strictly mobile-only Media-Selective bundle: NO links.txt, NO desktop/router files.
-    for stale_file in (
+    all_non_manifest_files = (
         "links.txt",
         "xray-client.json",
         "throne-windows11.json",
@@ -1295,33 +1539,52 @@ def write_user_bundle(
         "ios-singbox-selective.json",
         "linux-singbox.json",
         "linux-singbox-selective.json",
+        "linux-ai-user.json",
         "openwrt-singbox.json",
         "openwrt-outbound.json",
-    ):
+        "android-media-selective.json",
+        "ios-media-selective.json",
+    )
+    for stale_file in all_non_manifest_files:
         (user_dir / stale_file).unlink(missing_ok=True)
 
     paths: dict[str, Path] = {}
-    for key, filename, mob_platform in (
-        ("android_media", "android-media-selective.json", "android"),
-        ("ios_media", "ios-media-selective.json", "ios"),
-    ):
-        cfg = build_media_selective_profile(
+    if clean_profile == "ai-user":
+        cfg = build_ai_user_profile(
             domain=domain,
             user_uuid=user_uuid,
             reality_public_key=reality_public_key,
             reality_short_id=reality_short_id,
-            platform=mob_platform,
             port=port,
             server_host=server_host,
             fingerprint=clean_fp,
         )
-        p = user_dir / filename
+        p = user_dir / "linux-ai-user.json"
         p.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
-        paths[key] = p
+        paths["linux_ai_user"] = p
+    else:
+        # Strictly mobile-only Media-Selective bundle: NO links.txt, NO desktop/router files.
+        for key, filename, mob_platform in (
+            ("android_media", "android-media-selective.json", "android"),
+            ("ios_media", "ios-media-selective.json", "ios"),
+        ):
+            cfg = build_media_selective_profile(
+                domain=domain,
+                user_uuid=user_uuid,
+                reality_public_key=reality_public_key,
+                reality_short_id=reality_short_id,
+                platform=mob_platform,
+                port=port,
+                server_host=server_host,
+                fingerprint=clean_fp,
+            )
+            p = user_dir / filename
+            p.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+            paths[key] = p
 
     manifest, bundle_sha256 = _compute_bundle_manifest(
         paths,
-        profile_role="media-selective",
+        profile_role=clean_profile,
         profile_version=profile_version,
         username=username,
     )

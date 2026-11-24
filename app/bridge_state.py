@@ -21,7 +21,7 @@ from app.xray.config_builder import (
 
 BRIDGE_STATE_SCHEMA_VERSION = 2
 UPSTREAM_ROLES = frozenset({"ai-isolated", "media"})
-USER_PROFILES = frozenset({"ai-owner", "media-selective"})
+USER_PROFILES = frozenset({"ai-owner", "ai-user", "media-selective"})
 
 UPSTREAM_SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 USER_SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
@@ -173,10 +173,12 @@ def default_platforms_for_profile(profile: str) -> list[str]:
     clean = (profile or "").strip().lower()
     if clean == "ai-owner":
         return ["android", "ios", "windows", "linux", "openwrt"]
+    if clean == "ai-user":
+        return ["linux"]
     if clean == "media-selective":
         return ["android", "ios"]
     raise ValueError(
-        f"Unsupported user profile '{profile}': expected 'ai-owner' or 'media-selective'"
+        f"Unsupported user profile '{profile}': expected 'ai-owner', 'ai-user', or 'media-selective'"
     )
 
 
@@ -447,7 +449,7 @@ def validate_bridge_isolation(state: dict[str, Any]) -> list[str]:
             )
         bound_by_upstream[up_name].append((clean_user, uinfo))
 
-    # 1. Hard ai-isolated upstream guards (max 1 user, strictly ai-owner)
+    # 1. Hard ai-isolated upstream guards (at most 1 ai-owner + ai-user users; reject media-selective)
     ai_upstreams: list[tuple[str, dict[str, Any]]] = []
     media_upstreams: list[tuple[str, dict[str, Any]]] = []
 
@@ -455,16 +457,22 @@ def validate_bridge_isolation(state: dict[str, Any]) -> list[str]:
         if up_cfg["role"] == "ai-isolated":
             ai_upstreams.append((up_name, up_cfg))
             bound = bound_by_upstream[up_name]
-            if len(bound) > 1:
-                names = ", ".join(u for u, _ in bound)
-                raise ValueError(
-                    f"ai-isolated upstream '{up_name}' accepts at most 1 user (got {len(bound)}: {names})"
-                )
+            ai_owners: list[str] = []
             for bound_user, uinfo in bound:
-                if uinfo.get("profile") != "ai-owner":
+                prof = str(uinfo.get("profile", "")).strip().lower()
+                if prof not in {"ai-owner", "ai-user"}:
                     raise ValueError(
-                        f"ai-isolated upstream '{up_name}' rejects '{uinfo.get('profile')}' user '{bound_user}'; only 'ai-owner' is allowed"
+                        f"ai-isolated upstream '{up_name}' rejects '{prof}' user '{bound_user}'; "
+                        "only 'ai-owner' and 'ai-user' are allowed"
                     )
+                if prof == "ai-owner":
+                    ai_owners.append(bound_user)
+            if len(ai_owners) > 1:
+                names = ", ".join(ai_owners)
+                raise ValueError(
+                    f"ai-isolated upstream '{up_name}' accepts at most 1 'ai-owner' user "
+                    f"(got {len(ai_owners)}: {names})"
+                )
         else:
             media_upstreams.append((up_name, up_cfg))
 

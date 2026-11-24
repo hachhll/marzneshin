@@ -765,9 +765,9 @@ def user_add(
     }
     validate_bridge_isolation(candidate_state)
 
-    if resolved_profile == "ai-owner" and up_role == "media":
+    if resolved_profile in {"ai-owner", "ai-user"} and up_role == "media":
         sys.stderr.write(
-            f"[WARN] Binding ai-owner user '{clean_name}' to media upstream '{clean_up}'; "
+            f"[WARN] Binding {resolved_profile} user '{clean_name}' to media upstream '{clean_up}'; "
             "prefer an 'ai-isolated' exit for AI account isolation.\n"
         )
 
@@ -1053,7 +1053,7 @@ def _register_user_subparser(sub: argparse._SubParsersAction) -> None:
     p_add.add_argument("name")
     p_add.add_argument("--upstream", required=True)
     p_add.add_argument(
-        "--profile", choices=["ai-owner", "media-selective"], default=None
+        "--profile", choices=["ai-owner", "ai-user", "media-selective"], default=None
     )
     p_add.add_argument("--uuid", default=None)
     p_add.add_argument("--note", default="")
@@ -1238,6 +1238,8 @@ def _handle_user_command(
                 )
                 if info["profile"] == "media-selective":
                     print("  Raw VLESS: omitted (mobile-only Media-Selective JSON distribution)")
+                elif info["profile"] == "ai-user":
+                    print("  Raw VLESS: omitted (Linux Selective + mixed-in JSON distribution)")
             return 0
         if args.user_action == "assign":
             user_assign(
