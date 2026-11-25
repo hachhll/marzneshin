@@ -883,6 +883,57 @@ def user_show(
     }
 
 
+def user_refresh(
+    state_path: Path,
+    *,
+    name: str | None = None,
+    refresh_all: bool = False,
+    credentials_dir: Path,
+    fingerprint: str = "firefox",
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Re-render user client bundles and sha256 metadata without rotating UUIDs or restarting Xray."""
+    if bool(name) == bool(refresh_all):
+        raise ValueError("Specify either <name> or --all for 'user refresh'")
+    state = _require_bridge_state(state_path)
+    candidate_state = copy.deepcopy(state)
+    users = candidate_state.get("users", {})
+
+    if refresh_all:
+        target_names = list(users.keys())
+    else:
+        clean_name = validate_user_name(name or "")
+        if clean_name not in users:
+            raise ValueError(f"Unknown user '{clean_name}'")
+        target_names = [clean_name]
+
+    refreshed: list[dict[str, Any]] = []
+    for uname in target_names:
+        bundle_meta = _render_user_bundle_for_state(
+            candidate_state,
+            username=uname,
+            credentials_dir=credentials_dir,
+            fingerprint=fingerprint,
+        )
+        uinfo = candidate_state["users"][uname]
+        uinfo["profile_version"] = bundle_meta["profile_version"]
+        uinfo["singbox_min_version"] = bundle_meta["singbox_min_version"]
+        uinfo["profile_sha256"] = bundle_meta["profile_sha256"]
+        refreshed.append(
+            {
+                "user": uname,
+                "profile": uinfo["profile"],
+                "upstream": uinfo["upstream"],
+                "profile_version": bundle_meta["profile_version"],
+                "singbox_min_version": bundle_meta["singbox_min_version"],
+                "profile_sha256": bundle_meta["profile_sha256"],
+                "bundle_dir": str(bundle_meta["bundle_dir"]),
+            }
+        )
+
+    save_state(state_path, candidate_state)
+    return candidate_state, refreshed
+
+
 def apply_state(
     state: dict[str, Any],
     *,
@@ -1074,6 +1125,15 @@ def _register_user_subparser(sub: argparse._SubParsersAction) -> None:
 
     p_rm = u_sub.add_parser("remove", help="Remove user and delete credential bundle")
     p_rm.add_argument("name")
+
+    p_ref = u_sub.add_parser(
+        "refresh",
+        help="Re-render user credential bundles without rotating UUIDs or restarting Xray",
+    )
+    p_ref.add_argument("name", nargs="?", default=None)
+    p_ref.add_argument("--all", action="store_true", dest="refresh_all")
+    p_ref.add_argument("--fp", default="firefox")
+    p_ref.add_argument("--json", action="store_true", dest="as_json")
 
     for act in ("disable", "enable"):
         p_toggle = u_sub.add_parser(
@@ -1273,6 +1333,32 @@ def _handle_user_command(
                     ensure_ascii=False,
                 )
             )
+            return 0
+        if args.user_action == "refresh":
+            _, refreshed = user_refresh(
+                state_path,
+                name=args.name,
+                refresh_all=bool(args.refresh_all),
+                credentials_dir=credentials_dir,
+                fingerprint=args.fp,
+            )
+            if args.as_json:
+                print(
+                    json.dumps(
+                        {
+                            "status": "ok",
+                            "action": "user-refresh",
+                            "refreshed": refreshed,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                for item in refreshed:
+                    print(
+                        f"{item['user']}: profile={item['profile']} "
+                        f"version={item['profile_version']} sha256={item['profile_sha256']}"
+                    )
             return 0
         if args.user_action in ("disable", "enable"):
             set_user_disabled(

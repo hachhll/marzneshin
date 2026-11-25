@@ -71,28 +71,53 @@ PODKOP_DNS_DOMAIN_RULESET_NAMES = [
     "russia_inside",
 ]
 
-SELECTIVE_VPN_DOMAIN_SUFFIXES = [
-    # Netflix / Streaming
-    "netflix.com",
-    "netflix.net",
-    "nflximg.net",
-    "nflxvideo.net",
-    "nflxso.net",
-    "nflxext.com",
-    "fast.com",
-    # Google / Antigravity / YouTube / Gemini / NotebookLM
-    "google.com",
-    "google.ru",
-    "googleapis.com",
-    "googleusercontent.com",
-    "googlevideo.com",
-    "gstatic.com",
-    "gvt1.com",
-    "gvt2.com",
-    "ggpht.com",
-    "ytimg.com",
-    "youtube.com",
-    "youtu.be",
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    """Return items with duplicates removed while preserving first-seen order."""
+    return list(dict.fromkeys(items))
+
+
+AI_PROVIDER_DOMAIN_SUFFIXES = [
+    # OpenAI / ChatGPT / Codex
+    "openai.com",
+    "chatgpt.com",
+    "oaistatic.com",
+    "oaiusercontent.com",
+    "sora.com",
+    # Anthropic / Claude / Claude Code
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "claude.usercontent.com",
+    "claudeusercontent.com",
+    "claudemcpclient.com",
+    # Groq / Grok / x.ai / OpenRouter / HuggingFace / AI Providers
+    "groq.com",
+    "grok.com",
+    "x.ai",
+    "openrouter.ai",
+    "perplexity.ai",
+    "mistral.ai",
+    "huggingface.co",
+    "hf.co",
+    "cohere.com",
+    "together.ai",
+    "fireworks.ai",
+    "replicate.com",
+    # AI IDEs (web/auth/CDN)
+    "cursor.com",
+    "cursor.sh",
+    "cursor-cdn.com",
+    "windsurf.com",
+    "codeium.com",
+    "zed.dev",
+    "githubcopilot.com",
+    # Auth / Captcha used by AI portals
+    "auth0.com",
+    "auth0.net",
+    "recaptcha.net",
+]
+
+GOOGLE_AI_ANTIGRAVITY_DOMAIN_SUFFIXES = [
     "withgoogle.com",
     "deepmind.google",
     "antigravity.google",
@@ -105,78 +130,94 @@ SELECTIVE_VPN_DOMAIN_SUFFIXES = [
     "google.ai",
     "ai.google",
     "ai.dev",
-    "g.co",
-    "goo.gl",
-    "firebaseapp.com",
-    "gmail.com",
-    "recaptcha.net",
-    # OpenAI / Anthropic / AI IDEs
-    "openai.com",
-    "chatgpt.com",
-    "oaistatic.com",
-    "oaiusercontent.com",
-    "sora.com",
-    "anthropic.com",
-    "claude.ai",
-    "claude.com",
-    "claude.usercontent.com",
-    "claudeusercontent.com",
-    "claudemcpclient.com",
-    "cursor.com",
-    "cursor.sh",
-    "cursor-cdn.com",
-    "windsurf.com",
-    "codeium.com",
-    "perplexity.ai",
-    "huggingface.co",
-    # Databricks / Okta / Auth0
-    "databricks.com",
-    "databricks.com.cn",
-    "databricks.cfg",
-    "databricks-labs.com",
-    "databricks-prod-cloudfront.com",
-    "azuredatabricks.net",
-    "databricksusercontent.com",
-    "evently.com",
-    "databriks.com",
-    "databriks.net",
-    "okta.com",
-    "oktacdn.com",
-    "oktapreview.com",
-    "okta-emea.com",
-    "auth0.com",
-    "auth0.net",
-    # Discord / Telegram
-    "discord.com",
-    "discordapp.com",
-    "discordapp.net",
-    "discord.gg",
-    "discord.media",
-    "discordstatus.com",
-    "discordcdn.com",
-    "telegram.org",
-    "t.me",
-    "tdesktop.com",
-    "telesco.pe",
-    "telegra.ph",
-    "tg.dev",
-    "telegram.me",
-    # Social Media (Instagram / Facebook / Meta / X / LinkedIn)
-    "instagram.com",
-    "cdninstagram.com",
-    "facebook.com",
-    "fbcdn.net",
-    "fbsbx.com",
-    "fb.com",
-    "meta.com",
-    "threads.net",
-    "x.com",
-    "twitter.com",
-    "twimg.com",
-    "t.co",
-    "linkedin.com",
-    "licdn.com",
+    "aistudio.google.com",
+    "makersuite.google.com",
+    "generativelanguage.googleapis.com",
+    "cloudcode-pa.googleapis.com",
+    "daily-cloudcode-pa.sandbox.googleapis.com",
+    "alkalimakersuite-pa.clients6.google.com",
+    "proactivebackend-pa.googleapis.com",
+    "accounts.google.com",
+    "oauth2.googleapis.com",
+    "gvt1.com",
+    "gvt2.com",
 ]
+
+SELECTIVE_VPN_DOMAIN_SUFFIXES = _dedupe_preserve_order(
+    [
+        # Netflix / Streaming
+        "netflix.com",
+        "netflix.net",
+        "nflximg.net",
+        "nflxvideo.net",
+        "nflxso.net",
+        "nflxext.com",
+        "fast.com",
+        # Google / Antigravity / YouTube / Gemini / NotebookLM
+        "google.com",
+        "google.ru",
+        "googleapis.com",
+        "googleusercontent.com",
+        "googlevideo.com",
+        "gstatic.com",
+        "ggpht.com",
+        "ytimg.com",
+        "youtube.com",
+        "youtu.be",
+        "g.co",
+        "goo.gl",
+        "firebaseapp.com",
+        "gmail.com",
+        *GOOGLE_AI_ANTIGRAVITY_DOMAIN_SUFFIXES,
+        # OpenAI / Anthropic / Groq / AI IDEs / Providers
+        *AI_PROVIDER_DOMAIN_SUFFIXES,
+        # Databricks / Okta
+        "databricks.com",
+        "databricks.com.cn",
+        "databricks.cfg",
+        "databricks-labs.com",
+        "databricks-prod-cloudfront.com",
+        "azuredatabricks.net",
+        "databricksusercontent.com",
+        "evently.com",
+        "databriks.com",
+        "databriks.net",
+        "okta.com",
+        "oktacdn.com",
+        "oktapreview.com",
+        "okta-emea.com",
+        # Discord / Telegram
+        "discord.com",
+        "discordapp.com",
+        "discordapp.net",
+        "discord.gg",
+        "discord.media",
+        "discordstatus.com",
+        "discordcdn.com",
+        "telegram.org",
+        "t.me",
+        "tdesktop.com",
+        "telesco.pe",
+        "telegra.ph",
+        "tg.dev",
+        "telegram.me",
+        # Social Media (Instagram / Facebook / Meta / X / LinkedIn)
+        "instagram.com",
+        "cdninstagram.com",
+        "facebook.com",
+        "fbcdn.net",
+        "fbsbx.com",
+        "fb.com",
+        "meta.com",
+        "threads.net",
+        "x.com",
+        "twitter.com",
+        "twimg.com",
+        "t.co",
+        "linkedin.com",
+        "licdn.com",
+    ]
+)
 
 TELEGRAM_DC_CIDRS = [
     "149.154.160.0/20",
@@ -226,56 +267,61 @@ SELECTIVE_ANDROID_PACKAGES = [
 CLIENT_PROFILE_VERSION = "v1"
 SINGBOX_TARGET_MIN_VERSION = "1.14"
 
-MEDIA_SELECTIVE_DOMAIN_SUFFIXES = [
-    # YouTube
-    "youtube.com",
-    "youtu.be",
-    "googlevideo.com",
-    "ytimg.com",
-    "ggpht.com",
-    "youtubei.googleapis.com",
-    # Instagram / Meta
-    "instagram.com",
-    "cdninstagram.com",
-    "fbcdn.net",
-    "facebook.com",
-    "ig.me",
-    # Telegram
-    "telegram.org",
-    "t.me",
-    "tdesktop.com",
-    "telesco.pe",
-    "telegra.ph",
-    "tg.dev",
-    "telegram.me",
-    # TikTok
-    "tiktok.com",
-    "tiktokv.com",
-    "tiktokv.eu",
-    "tiktokv.us",
-    "tiktokcdn.com",
-    "tiktokcdn-eu.com",
-    "tiktokcdn-us.com",
-    "byteoversea.com",
-    "bytegecko.com",
-    "bytedance.com",
-    "byteimg.com",
-    "ibytedtos.com",
-    "snssdk.com",
-    "isnssdk.com",
-    "sgsnssdk.com",
-    "amemv.com",
-    "pstatp.com",
-    "muscdn.com",
-    "musical.ly",
-    "ttwstatic.com",
-    # WhatsApp
-    "whatsapp.com",
-    "whatsapp.net",
-    "wa.me",
-    # Yazio
-    "yazio.com",
-]
+MEDIA_SELECTIVE_DOMAIN_SUFFIXES = _dedupe_preserve_order(
+    [
+        # YouTube
+        "youtube.com",
+        "youtu.be",
+        "googlevideo.com",
+        "ytimg.com",
+        "ggpht.com",
+        "youtubei.googleapis.com",
+        # Instagram / Meta
+        "instagram.com",
+        "cdninstagram.com",
+        "fbcdn.net",
+        "facebook.com",
+        "ig.me",
+        # Telegram
+        "telegram.org",
+        "t.me",
+        "tdesktop.com",
+        "telesco.pe",
+        "telegra.ph",
+        "tg.dev",
+        "telegram.me",
+        # TikTok
+        "tiktok.com",
+        "tiktokv.com",
+        "tiktokv.eu",
+        "tiktokv.us",
+        "tiktokcdn.com",
+        "tiktokcdn-eu.com",
+        "tiktokcdn-us.com",
+        "byteoversea.com",
+        "bytegecko.com",
+        "bytedance.com",
+        "byteimg.com",
+        "ibytedtos.com",
+        "snssdk.com",
+        "isnssdk.com",
+        "sgsnssdk.com",
+        "amemv.com",
+        "pstatp.com",
+        "muscdn.com",
+        "musical.ly",
+        "ttwstatic.com",
+        # WhatsApp
+        "whatsapp.com",
+        "whatsapp.net",
+        "wa.me",
+        # Yazio
+        "yazio.com",
+        # Blocked AI services (Antigravity / Google AI, OpenAI / Codex, Anthropic / Claude Code, Groq, etc.)
+        *GOOGLE_AI_ANTIGRAVITY_DOMAIN_SUFFIXES,
+        *AI_PROVIDER_DOMAIN_SUFFIXES,
+    ]
+)
 
 MEDIA_SELECTIVE_ANDROID_PACKAGES = [
     "com.google.android.youtube",
@@ -289,6 +335,9 @@ MEDIA_SELECTIVE_ANDROID_PACKAGES = [
     "com.whatsapp",
     "com.whatsapp.w4b",
     "com.yazio.android",
+    "com.openai.chatgpt",
+    "com.anthropic.claude",
+    "com.google.android.apps.bard",
 ]
 
 AI_USER_ROUTE_EXCLUDE_ADDRESSES = [
@@ -297,173 +346,127 @@ AI_USER_ROUTE_EXCLUDE_ADDRESSES = [
     "192.168.0.0/16",
 ]
 
-AI_USER_DOMAIN_SUFFIXES = [
-    # OpenAI / ChatGPT
-    "openai.com",
-    "chatgpt.com",
-    "oaistatic.com",
-    "oaiusercontent.com",
-    "sora.com",
-    # Anthropic / Claude / Claude Code
-    "anthropic.com",
-    "claude.ai",
-    "claude.com",
-    "claude.usercontent.com",
-    "claudeusercontent.com",
-    "claudemcpclient.com",
-    # Google / Gemini / AI Studio / Antigravity / NotebookLM / GCP / YouTube
-    "google.com",
-    "googleapis.com",
-    "googleusercontent.com",
-    "googlevideo.com",
-    "gstatic.com",
-    "gvt1.com",
-    "gvt2.com",
-    "ggpht.com",
-    "ytimg.com",
-    "youtube.com",
-    "youtu.be",
-    "withgoogle.com",
-    "deepmind.google",
-    "antigravity.google",
-    "antigravityide.net",
-    "notebooklm.google",
-    "notebooklm-enterprise.google",
-    "gemini.google",
-    "labs.google",
-    "google.dev",
-    "google.ai",
-    "ai.google",
-    "ai.dev",
-    "g.co",
-    "goo.gl",
-    "firebaseapp.com",
-    "gmail.com",
-    "recaptcha.net",
-    "pkg.dev",
-    "gcr.io",
-    # OpenRouter / Grok / x.ai / HuggingFace / AI Providers
-    "openrouter.ai",
-    "x.ai",
-    "grok.com",
-    "huggingface.co",
-    "hf.co",
-    "perplexity.ai",
-    "mistral.ai",
-    "groq.com",
-    "cohere.com",
-    "together.ai",
-    "fireworks.ai",
-    "replicate.com",
-    # AI IDEs
-    "cursor.com",
-    "cursor.sh",
-    "cursor-cdn.com",
-    "windsurf.com",
-    "codeium.com",
-    "zed.dev",
-    # GitHub
-    "github.com",
-    "githubusercontent.com",
-    "githubassets.com",
-    "github.io",
-    "github.dev",
-    "githubcopilot.com",
-    "ghcr.io",
-    # Databricks / Okta / Auth0
-    "databricks.com",
-    "databricks.com.cn",
-    "databricks.cfg",
-    "databricks-labs.com",
-    "databricks-prod-cloudfront.com",
-    "azuredatabricks.net",
-    "databricksusercontent.com",
-    "evently.com",
-    "databriks.com",
-    "databriks.net",
-    "okta.com",
-    "oktacdn.com",
-    "oktapreview.com",
-    "okta-emea.com",
-    "auth0.com",
-    "auth0.net",
-    # Microsoft / Azure / VS Code / Copilot
-    "microsoft.com",
-    "microsoftonline.com",
-    "msauth.net",
-    "msftauth.net",
-    "msftidentity.com",
-    "live.com",
-    "office.com",
-    "office365.com",
-    "azure.com",
-    "azure.net",
-    "azurewebsites.net",
-    "azureedge.net",
-    "visualstudio.com",
-    "vscode.dev",
-    "vscode-cdn.net",
-    "msecnd.net",
-    "windows.net",
-    # Package / Container Registries & Dev Tooling
-    "pypi.org",
-    "pythonhosted.org",
-    "python.org",
-    "astral.sh",
-    "npmjs.org",
-    "npmjs.com",
-    "nodejs.org",
-    "yarnpkg.com",
-    "pnpm.io",
-    "deno.land",
-    "bun.sh",
-    "docker.io",
-    "docker.com",
-    "quay.io",
-    "k8s.io",
-    "nvcr.io",
-    "crates.io",
-    "rust-lang.org",
-    "rustup.rs",
-    "docs.rs",
-    "golang.org",
-    "go.dev",
-    "stackoverflow.com",
-    "sstatic.net",
-    "jetbrains.com",
-    "gitlab.com",
-    "bitbucket.org",
-    "brew.sh",
-    # Discord / Telegram / X / Meta / LinkedIn (complements podkop non-domain rule-sets for DNS)
-    "discord.com",
-    "discordapp.com",
-    "discordapp.net",
-    "discord.gg",
-    "discord.media",
-    "discordstatus.com",
-    "discordcdn.com",
-    "telegram.org",
-    "t.me",
-    "tdesktop.com",
-    "telesco.pe",
-    "telegra.ph",
-    "tg.dev",
-    "telegram.me",
-    "x.com",
-    "twitter.com",
-    "twimg.com",
-    "t.co",
-    "instagram.com",
-    "cdninstagram.com",
-    "facebook.com",
-    "fbcdn.net",
-    "fbsbx.com",
-    "fb.com",
-    "meta.com",
-    "threads.net",
-    "linkedin.com",
-    "licdn.com",
-]
+AI_USER_DOMAIN_SUFFIXES = _dedupe_preserve_order(
+    [
+        # OpenAI / Anthropic / Groq / Grok / AI IDEs / Providers
+        *AI_PROVIDER_DOMAIN_SUFFIXES,
+        # Google / Gemini / AI Studio / Antigravity / NotebookLM / GCP / YouTube
+        "google.com",
+        "googleapis.com",
+        "googleusercontent.com",
+        "googlevideo.com",
+        "gstatic.com",
+        "ggpht.com",
+        "ytimg.com",
+        "youtube.com",
+        "youtu.be",
+        "g.co",
+        "goo.gl",
+        "firebaseapp.com",
+        "gmail.com",
+        "pkg.dev",
+        "gcr.io",
+        *GOOGLE_AI_ANTIGRAVITY_DOMAIN_SUFFIXES,
+        # GitHub
+        "github.com",
+        "githubusercontent.com",
+        "githubassets.com",
+        "github.io",
+        "github.dev",
+        "ghcr.io",
+        # Databricks / Okta
+        "databricks.com",
+        "databricks.com.cn",
+        "databricks.cfg",
+        "databricks-labs.com",
+        "databricks-prod-cloudfront.com",
+        "azuredatabricks.net",
+        "databricksusercontent.com",
+        "evently.com",
+        "databriks.com",
+        "databriks.net",
+        "okta.com",
+        "oktacdn.com",
+        "oktapreview.com",
+        "okta-emea.com",
+        # Microsoft / Azure / VS Code / Copilot
+        "microsoft.com",
+        "microsoftonline.com",
+        "msauth.net",
+        "msftauth.net",
+        "msftidentity.com",
+        "live.com",
+        "office.com",
+        "office365.com",
+        "azure.com",
+        "azure.net",
+        "azurewebsites.net",
+        "azureedge.net",
+        "visualstudio.com",
+        "vscode.dev",
+        "vscode-cdn.net",
+        "msecnd.net",
+        "windows.net",
+        # Package / Container Registries & Dev Tooling
+        "pypi.org",
+        "pythonhosted.org",
+        "python.org",
+        "astral.sh",
+        "npmjs.org",
+        "npmjs.com",
+        "nodejs.org",
+        "yarnpkg.com",
+        "pnpm.io",
+        "deno.land",
+        "bun.sh",
+        "docker.io",
+        "docker.com",
+        "quay.io",
+        "k8s.io",
+        "nvcr.io",
+        "crates.io",
+        "rust-lang.org",
+        "rustup.rs",
+        "docs.rs",
+        "golang.org",
+        "go.dev",
+        "stackoverflow.com",
+        "sstatic.net",
+        "jetbrains.com",
+        "gitlab.com",
+        "bitbucket.org",
+        "brew.sh",
+        # Discord / Telegram / X / Meta / LinkedIn (complements podkop non-domain rule-sets for DNS)
+        "discord.com",
+        "discordapp.com",
+        "discordapp.net",
+        "discord.gg",
+        "discord.media",
+        "discordstatus.com",
+        "discordcdn.com",
+        "telegram.org",
+        "t.me",
+        "tdesktop.com",
+        "telesco.pe",
+        "telegra.ph",
+        "tg.dev",
+        "telegram.me",
+        "x.com",
+        "twitter.com",
+        "twimg.com",
+        "t.co",
+        "instagram.com",
+        "cdninstagram.com",
+        "facebook.com",
+        "fbcdn.net",
+        "fbsbx.com",
+        "fb.com",
+        "meta.com",
+        "threads.net",
+        "linkedin.com",
+        "licdn.com",
+    ]
+)
 
 
 def _ensure_not_ip_host(domain: str) -> str:
@@ -575,6 +578,7 @@ def _build_singbox_dns_and_route(
     selective_apps: list[str] | None = None,
     selective_cidrs: list[str] | None = None,
     include_podkop_rulesets: bool | None = None,
+    podkop_ruleset_names: list[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build DNS and route config blocks for either full-tunnel or selective whitelist mode."""
     base_dns_servers: list[dict[str, Any]] = [
@@ -636,6 +640,12 @@ def _build_singbox_dns_and_route(
         if include_podkop_rulesets is not None
         else (not is_ios and not is_openwrt)
     )
+    if podkop_ruleset_names is not None:
+        active_podkop_names = list(podkop_ruleset_names)
+    elif use_podkop:
+        active_podkop_names = list(PODKOP_COMMUNITY_RULESET_NAMES)
+    else:
+        active_podkop_names = []
     app_field = "process_name" if is_windows else "package_name"
     default_apps: list[str] = []
     if is_windows:
@@ -651,34 +661,34 @@ def _build_singbox_dns_and_route(
     cidrs = list(TELEGRAM_DC_CIDRS if selective_cidrs is None else selective_cidrs)
     use_http_client_v14 = not is_windows and not is_openwrt
     http_client_tag = "proxy-http"
-    podkop_rulesets = (
-        [
-            (
-                {
-                    "type": "remote",
-                    "tag": f"podkop-{name}",
-                    "format": "binary",
-                    "url": f"{PODKOP_COMMUNITY_RULESET_BASE}/{name}.srs",
-                    "http_client": http_client_tag,
-                    "update_interval": "1d",
-                }
-                if use_http_client_v14
-                else {
-                    "type": "remote",
-                    "tag": f"podkop-{name}",
-                    "format": "binary",
-                    "url": f"{PODKOP_COMMUNITY_RULESET_BASE}/{name}.srs",
-                    "download_detour": "proxy",
-                    "update_interval": "1d",
-                }
-            )
-            for name in PODKOP_COMMUNITY_RULESET_NAMES
-        ]
-        if use_podkop
-        else []
-    )
+    podkop_rulesets = [
+        (
+            {
+                "type": "remote",
+                "tag": f"podkop-{name}",
+                "format": "binary",
+                "url": f"{PODKOP_COMMUNITY_RULESET_BASE}/{name}.srs",
+                "http_client": http_client_tag,
+                "update_interval": "1d",
+            }
+            if use_http_client_v14
+            else {
+                "type": "remote",
+                "tag": f"podkop-{name}",
+                "format": "binary",
+                "url": f"{PODKOP_COMMUNITY_RULESET_BASE}/{name}.srs",
+                "download_detour": "proxy",
+                "update_interval": "1d",
+            }
+        )
+        for name in active_podkop_names
+    ]
     podkop_tags = [rs["tag"] for rs in podkop_rulesets]
-    podkop_dns_tags = [f"podkop-{name}" for name in PODKOP_DNS_DOMAIN_RULESET_NAMES]
+    podkop_dns_tags = [
+        f"podkop-{name}"
+        for name in active_podkop_names
+        if name in PODKOP_DNS_DOMAIN_RULESET_NAMES
+    ]
 
     dns_rules: list[dict[str, Any]] = [
         {"query_type": "HTTPS", "action": "reject"},
@@ -703,7 +713,7 @@ def _build_singbox_dns_and_route(
     dns_rules.append(
         {"domain_suffix": [".ru", ".su", ".xn--p1ai"], "action": "route", "server": "dns-local"}
     )
-    if use_podkop:
+    if podkop_dns_tags:
         dns_rules.append(
             {"rule_set": podkop_dns_tags, "action": "route", "server": "dns-remote"}
         )
@@ -772,7 +782,7 @@ def _build_singbox_dns_and_route(
             "outbound": "direct",
         }
     )
-    if use_podkop:
+    if podkop_tags:
         route_rules.extend(
             [
                 {
@@ -870,6 +880,7 @@ def build_singbox_profile(
     selective_apps: list[str] | None = None,
     selective_cidrs: list[str] | None = None,
     include_podkop_rulesets: bool | None = None,
+    podkop_ruleset_names: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate hardened sing-box JSON for Windows 11, Android, iOS, Linux, or OpenWrt."""
     clean_platform = (platform or "windows11-throne").strip().lower()
@@ -976,6 +987,7 @@ def build_singbox_profile(
         selective_apps=selective_apps,
         selective_cidrs=selective_cidrs,
         include_podkop_rulesets=include_podkop_rulesets,
+        podkop_ruleset_names=podkop_ruleset_names,
     )
 
     cache_cfg: dict[str, Any] = {"enabled": True}
@@ -1036,7 +1048,8 @@ def build_media_selective_profile(
             else []
         ),
         selective_cidrs=list(TELEGRAM_DC_CIDRS),
-        include_podkop_rulesets=False,
+        include_podkop_rulesets=(clean_platform == "android"),
+        podkop_ruleset_names=(["google_ai"] if clean_platform == "android" else []),
     )
 
 

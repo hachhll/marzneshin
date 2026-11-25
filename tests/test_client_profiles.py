@@ -440,9 +440,38 @@ def test_media_consumer_mobile_only_profiles_and_no_raw_links(tmp_path: Path):
         assert "download_detour" not in serialized
         assert "store_rdrc" not in serialized
         assert "stack" not in json.dumps(cfg["inbounds"])
-        # Only 5 target media services (no AI/IDE domains leaked into media-consumer profile)
-        for ai_dom in ("openai.com", "claude.ai", "anthropic.com", "antigravity.google"):
-            assert ai_dom not in serialized
+        # Target media services + blocked AI services (Antigravity, Codex, Claude Code, Groq, etc.)
+        for ai_dom in (
+            "antigravity.google",
+            "antigravityide.net",
+            "gemini.google",
+            "aistudio.google.com",
+            "generativelanguage.googleapis.com",
+            "cloudcode-pa.googleapis.com",
+            "daily-cloudcode-pa.sandbox.googleapis.com",
+            "accounts.google.com",
+            "oauth2.googleapis.com",
+            "gvt1.com",
+            "gvt2.com",
+            "openai.com",
+            "chatgpt.com",
+            "anthropic.com",
+            "claude.ai",
+            "claude.com",
+            "groq.com",
+            "grok.com",
+            "x.ai",
+            "openrouter.ai",
+            "perplexity.ai",
+            "mistral.ai",
+            "huggingface.co",
+            "hf.co",
+            "cursor.com",
+            "windsurf.com",
+            "auth0.com",
+            "recaptcha.net",
+        ):
+            assert ai_dom in serialized
         for media_dom in (
             "youtube.com",
             "instagram.com",
@@ -455,6 +484,14 @@ def test_media_consumer_mobile_only_profiles_and_no_raw_links(tmp_path: Path):
             "yazio.com",
         ):
             assert media_dom in serialized
+        # Wildcard google.com / googleapis.com stay excluded from media-selective
+        assert "google.com" not in MEDIA_SELECTIVE_DOMAIN_SUFFIXES
+        assert "googleapis.com" not in MEDIA_SELECTIVE_DOMAIN_SUFFIXES
+        # Verify AI & media suffixes appear in both dns-remote and proxy route rules
+        assert any(
+            r.get("server") == "dns-remote" and set(MEDIA_SELECTIVE_DOMAIN_SUFFIXES).issubset(set(r.get("domain_suffix", [])))
+            for r in cfg["dns"]["rules"]
+        )
         # Unconditional blocking of QUIC, STUN, BitTorrent, ::/0, telemetry
         rules = cfg["route"]["rules"]
         assert {"protocol": ["quic", "stun", "bittorrent"], "action": "reject"} in rules
@@ -462,11 +499,18 @@ def test_media_consumer_mobile_only_profiles_and_no_raw_links(tmp_path: Path):
         assert {"ip_cidr": ["::/0"], "action": "reject"} in rules
         assert any("location.googleapis.com" in r.get("domain", []) and r.get("action") == "reject" for r in rules)
 
-    # Android-specific fields present on Android, strictly omitted on iOS
+    # Android-specific fields present on Android (including AI packages and only podkop-google_ai), omitted on iOS
     assert and_cfg["route"].get("override_android_vpn") is True
     assert and_cfg["inbounds"][0]["interface_name"] == "sbtun0"
-    assert "com.yazio.android" in MEDIA_SELECTIVE_ANDROID_PACKAGES
-    assert any(r.get("package_name") == MEDIA_SELECTIVE_ANDROID_PACKAGES for r in and_cfg["route"]["rules"])
+    for pkg in ("com.yazio.android", "com.openai.chatgpt", "com.anthropic.claude", "com.google.android.apps.bard"):
+        assert pkg in MEDIA_SELECTIVE_ANDROID_PACKAGES
+    assert any(r.get("package_name") == MEDIA_SELECTIVE_ANDROID_PACKAGES and r.get("outbound") == "proxy" for r in and_cfg["route"]["rules"])
+    assert any(r.get("package_name") == MEDIA_SELECTIVE_ANDROID_PACKAGES and r.get("server") == "dns-remote" for r in and_cfg["dns"]["rules"])
+    assert [rs["tag"] for rs in and_cfg["route"]["rule_set"]] == ["podkop-google_ai"]
+    assert and_cfg["route"]["rule_set"][0]["http_client"] == "proxy-http"
+    assert {"rule_set": ["podkop-google_ai"], "action": "route", "server": "dns-remote"} in and_cfg["dns"]["rules"]
+    assert {"rule_set": ["podkop-google_ai"], "action": "route", "outbound": "proxy"} in and_cfg["route"]["rules"]
+    assert "russia_inside" not in json.dumps(and_cfg)
 
     ios_serialized = json.dumps(ios_cfg)
     assert "package_name" not in ios_serialized
@@ -474,6 +518,7 @@ def test_media_consumer_mobile_only_profiles_and_no_raw_links(tmp_path: Path):
     assert "override_android_vpn" not in ios_serialized
     assert "interface_name" not in ios_serialized
     assert "rule_set" not in ios_cfg["route"]
+    assert all("rule_set" not in r for r in ios_cfg["dns"]["rules"])
     assert "russia_inside" not in ios_serialized
     assert set(MEDIA_SELECTIVE_DOMAIN_SUFFIXES).issubset(
         set(next(r["domain_suffix"] for r in ios_cfg["route"]["rules"] if r.get("outbound") == "proxy" and "domain_suffix" in r))
@@ -542,6 +587,42 @@ def test_ai_owner_five_os_admin_suite_and_https_dns_block(tmp_path: Path):
     lin_cfg = json.loads((user_dir / "linux-singbox-selective.json").read_text())
     assert "override_android_vpn" not in lin_cfg["route"]
     assert {i["type"] for i in lin_cfg["inbounds"]} == {"tun", "mixed"}
+
+    # ai-owner Selective parity for shared blocked AI providers (Groq, Grok/x.ai, OpenRouter, etc.)
+    for sel_name in (
+        "throne-windows11-selective.json",
+        "android-singbox-selective.json",
+        "ios-singbox-selective.json",
+        "linux-singbox-selective.json",
+        "openwrt-singbox.json",
+    ):
+        sel_cfg = json.loads((user_dir / sel_name).read_text())
+        sel_proxy_domains = next(
+            r["domain_suffix"]
+            for r in sel_cfg["route"]["rules"]
+            if r.get("outbound") == "proxy" and "domain_suffix" in r
+        )
+        sel_dns_domains = next(
+            r["domain_suffix"]
+            for r in sel_cfg["dns"]["rules"]
+            if r.get("server") == "dns-remote" and "domain_suffix" in r
+        )
+        for shared_ai in (
+            "groq.com",
+            "grok.com",
+            "x.ai",
+            "openrouter.ai",
+            "hf.co",
+            "mistral.ai",
+            "together.ai",
+            "fireworks.ai",
+            "replicate.com",
+            "cohere.com",
+            "zed.dev",
+            "githubcopilot.com",
+        ):
+            assert shared_ai in sel_proxy_domains, f"{sel_name} missing {shared_ai}"
+            assert shared_ai in sel_dns_domains, f"{sel_name} dns missing {shared_ai}"
 
     # OpenWrt router-safe tproxy + standalone podkop outbound
     owrt_sb = json.loads((user_dir / "openwrt-singbox.json").read_text())

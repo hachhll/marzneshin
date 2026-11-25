@@ -35,7 +35,7 @@ Usage:
   script.sh bridge-transport <vision|xhttp> [--upstream <name>] [--path <64-hex>] [--upstream-ip <ip>] [--upstream-domain <fqdn>] \
             [--upstream-uuid <uuid>] [--upstream-pbk <pubkey>] [--upstream-sid <shortid>]
   script.sh upstream <add|list|remove|migrate> ...
-  script.sh user <add|list|show|assign|remove|disable|enable> ...
+  script.sh user <add|list|show|assign|remove|refresh|disable|enable> ...
   script.sh stats [--reset]
   script.sh rotate
   script.sh decoy <corporate|blog|coming_soon|https://...>
@@ -192,11 +192,11 @@ handle_subcommand() {
         user)
             shift
             if [ "$#" -lt 1 ]; then
-                log_err "Usage: script.sh user <add|list|show|assign|remove|disable|enable> ..."
+                log_err "Usage: script.sh user <add|list|show|assign|remove|refresh|disable|enable> ..."
                 exit 1
             fi
             local user_action="${1:-}"
-            if [ "$user_action" = "list" ] || [ "$user_action" = "show" ]; then
+            if [ "$user_action" = "list" ] || [ "$user_action" = "show" ] || [ "$user_action" = "refresh" ]; then
                 run_python_cli user "$@"
                 exit $?
             fi

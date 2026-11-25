@@ -620,3 +620,165 @@ def test_cli_user_add_show_assign_remove_and_script_sh(tmp_path: Path, capsys):
     assert "alice" not in final_state["users"]
     assert "admin-ai" in final_state["users"]
     assert "owner" in final_state["users"]
+
+
+def test_cli_user_refresh_preserves_uuid_and_updates_stale_bundles(tmp_path: Path, capsys):
+    data_dir = tmp_path / "data"
+    creds_dir = tmp_path / "creds"
+    _init_sample_bridge(data_dir, creds_dir)
+    capsys.readouterr()
+
+    state_path = data_dir / "state.json"
+    xray_cfg_path = data_dir / "xray" / "config.json"
+
+    _, pub_m = generate_reality_keypair()
+    sid_m = generate_short_id()
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "upstream",
+                "add",
+                "exit-media-1",
+                "--role",
+                "media",
+                "--ip",
+                "203.0.113.20",
+                "--domain",
+                "media1.example.net",
+                "--uuid",
+                "bbbbbbbb-2222-4222-8222-222222222222",
+                "--pbk",
+                pub_m,
+                "--sid",
+                sid_m,
+                "--transport",
+                "xhttp",
+                "--xhttp-path",
+                "b" * 64,
+            ]
+        )
+        == 0
+    )
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "user",
+                "add",
+                "alice",
+                "--upstream",
+                "exit-media-1",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    state_before = json.loads(state_path.read_text(encoding="utf-8"))
+    alice_uuid = state_before["users"]["alice"]["uuid"]
+    alice_sha = state_before["users"]["alice"]["profile_sha256"]
+    owner_sha = state_before["users"]["owner"]["profile_sha256"]
+    xray_before = xray_cfg_path.read_text(encoding="utf-8")
+
+    # Simulate outdated on-disk bundles & sha256 metadata prior to refresh
+    alice_ios = creds_dir / "users" / "alice" / "ios-media-selective.json"
+    alice_ios.write_text('{"stale": true}\n', encoding="utf-8")
+    owner_ios = creds_dir / "users" / "owner" / "ios-singbox-selective.json"
+    owner_ios.write_text('{"stale": true}\n', encoding="utf-8")
+    state_before["users"]["alice"]["profile_sha256"] = "0" * 64
+    state_before["users"]["owner"]["profile_sha256"] = "0" * 64
+    state_path.write_text(json.dumps(state_before, indent=2) + "\n", encoding="utf-8")
+
+    # 1. Single-user refresh updates only alice without touching owner or xray/config.json
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "user",
+                "refresh",
+                "alice",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    ref_single = json.loads(capsys.readouterr().out)
+    assert ref_single["action"] == "user-refresh"
+    assert [r["user"] for r in ref_single["refreshed"]] == ["alice"]
+    state_mid = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state_mid["users"]["alice"]["uuid"] == alice_uuid
+    assert state_mid["users"]["alice"]["upstream"] == "exit-media-1"
+    assert state_mid["users"]["alice"]["profile_sha256"] == alice_sha
+    assert state_mid["users"]["owner"]["profile_sha256"] == "0" * 64
+    assert "antigravity.google" in alice_ios.read_text(encoding="utf-8")
+    assert owner_ios.read_text(encoding="utf-8") == '{"stale": true}\n'
+    assert xray_cfg_path.read_text(encoding="utf-8") == xray_before
+
+    # 2. --all via script.sh refreshes remaining users too without touching UUIDs or Xray
+    env = os.environ.copy()
+    env.update(
+        {
+            "MARZNESHIN_DATA_DIR": str(data_dir),
+            "VPN_CREDENTIALS_DIR": str(creds_dir),
+            "XRAY_CONFIG_PATH": str(xray_cfg_path),
+            "NGINX_RUNTIME_DIR": str(data_dir / "nginx-runtime"),
+        }
+    )
+    sh_ref = subprocess.run(
+        ["bash", str(REPO_ROOT / "script.sh"), "user", "refresh", "--all"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert sh_ref.returncode == 0, sh_ref.stderr
+    assert "alice:" in sh_ref.stdout
+    assert "owner:" in sh_ref.stdout
+    state_after = json.loads(state_path.read_text(encoding="utf-8"))
+    owner_manifest = json.loads(
+        (creds_dir / "users" / "owner" / "bundle-manifest.json").read_text(encoding="utf-8")
+    )
+    assert len(state_after["users"]["owner"]["profile_sha256"]) == 64
+    assert state_after["users"]["owner"]["profile_sha256"] == owner_manifest["bundle_sha256"]
+    assert "groq.com" in owner_ios.read_text(encoding="utf-8")
+    assert xray_cfg_path.read_text(encoding="utf-8") == xray_before
+
+    # 3. Negative cases: unknown user or invalid flag combination
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "user",
+                "refresh",
+                "nonexistent-user",
+            ]
+        )
+        == 1
+    )
+    assert (
+        cli_main(
+            [
+                "--data-dir",
+                str(data_dir),
+                "--credentials-dir",
+                str(creds_dir),
+                "user",
+                "refresh",
+            ]
+        )
+        == 1
+    )
+    capsys.readouterr()
